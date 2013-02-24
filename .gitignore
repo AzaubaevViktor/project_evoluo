@@ -33,3 +33,9 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+
+#Pyhon
+__pycache__/
+
+#Sublime
+*.sublime*
