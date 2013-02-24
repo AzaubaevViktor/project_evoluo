@@ -172,8 +172,7 @@ class Curses(Screen):
         
     def draw(self,layer):
         if layer.__class__ == LayerObjects:
-            for obj in layer._objs:
-                # x,y = obj.get_pos()
+            for obj in layer.get_objs():
 
                 def _wrt(x,y,obj):
                     self.write((x,y),"%d" %(obj._energy / obj._max_energy*10) ,curses.A_REVERSE)
@@ -210,7 +209,6 @@ class Curses(Screen):
         curses.endwin()
         self._scr.keypad(0)
         self._scr.nodelay(1)
-
 
 class Layer:
     """ Класс слоя. Клеточный автомат, который воздейсвтует на объекты """
@@ -277,25 +275,31 @@ class LayerObjects(Layer):
         self.height = h
         self._objs = []
         self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
-    
+
     def _create_obj(self,obj):
         """ Создаёт объект """
-        self._objs.append(obj)
+        self._objs.append({"obj":obj,"id":random.random()})
+
+    def get_objs(self):
+        return [x["obj"] for x in self._objs]
 
     def _impact_layer(self,layer):
         """ Для каждого объекта внутри себя заставляет его обработать слой """
-        for obj in self._objs:
+        for obj in self.get_objs():
             obj.step(layer)
 
     def _collision(self,i,k,inside):
         """ Просчитывает скорости объектов
-       РАсчёт коэффициента: 1.1"""
-        p1 = self._objs[i].pos[0]
-        w1 = self._objs[i].speed[1]
-        m1 = self._objs[i].mass
-        p2 = self._objs[k].pos[0]
-        w2 = self._objs[k].speed[1]
-        m2 = self._objs[k].mass
+        РАсчёт коэффициента: 1.1"""
+        _objs = self.get_objs()
+        p1 = _objs[i].pos[0]
+        v1 = _objs[i].speed[0]
+        w1 = _objs[i].speed[1]
+        m1 = _objs[i].mass
+        p2 = _objs[k].pos[0]
+        v2 = _objs[k].speed[0]
+        w2 = _objs[k].speed[1]
+        m2 = _objs[k].mass
         #получаем вектор-прямую, на которую будут откладываться взаимодействующие вектора
         phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
 
@@ -303,23 +307,29 @@ class LayerObjects(Layer):
         def _get(m1,m2,v1,v2):
             """ уравнение полученных скоростей, чтобы по 10 раз не писать одно и то же """ 
             return (v1 * (m1 - m2) + v2 * 2 * m2) / (m1 + m2)
+        phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
+        v1.phi -= phi # поворот так, что линия есть OX 
+        v2.phi -= phi
+        _v1 = v1.copy()
+        _v2 = v2.copy()
+        _v1.x = _get(m1,m2,v1.x,v2.x) # взаимодействуют
+        _v2.x = _get(m2,m1,v2.x,v1.x)
+        _v1.phi += phi #поворачиваем обратно
+        _v2.phi += phi
+        self._objs[i].speed[0] = _v1
+        self._objs[j].speed[0] = _v2
 
-        self._objs[i].speed[0] = _get(m1,m2,v1,v2) # линейные скорости
-        self._objs[j].speed[0] = _get(m2,m1,v2,v1)
-
-        # self._objs[i].speed[1] += - w2 * m2 / m1 / 10 - w1 / 10 # сохраняем импульс и передаём 1/10 от угловой скорости
-        # self._objs[k].speed[1] += - w1 * m1 / m2 / 10 - w2 / 10
-        mass12 = self._objs[k].mass / self._objs[i].mass
-        self._objs[i].speed[1] -= (self._objs[k].speed[1] * mass12  + self._objs[i].speed[1]) / 10 * dt
-        self._objs[k].speed[1] -= (self._objs[i].speed[1] / mass12  + self._objs[k].speed[1]) / 10 * dt
+        mass12 = _objs[k].mass / _objs[i].mass
+        _objs[i].speed[1] -= (w2 * mass12 + w1) / 10 * dt # сохраняем импульс и передаём 1/10 от угловой скорости
+        _objs[k].speed[1] -= (w1 / mass12 + w2) / 10 * dt
 
     def collision(self):
         """ Определяет, сталкиваются ли объекты """
-        _objs = self._objs
+        _objs = self.get_objs()
         lenght = len(_objs)
         for i in range(lenght):
             for j in range(i+1,lenght):
-                inside = (get_min_distance((self.width,self.height),self._objs[i].pos[0],self._objs[j].pos[0]) - (self._objs[i].radius+self._objs[j].radius)) / 2
+                inside = (get_min_distance((self.width,self.height),_objs[i].pos[0],_objs[j].pos[0]) - (_objs[i].radius+_objs[j].radius)) / 2
                 if inside < 0:
                     self._collision(i,j,-inside)
                     self._colliding[1].append(getpair(i,j)) # добавляет сталкивающиеся объекты в новый, чтобы на следующем шаге показать, что они уже сталкивались и надо их посильнее оттолкнуть
@@ -351,7 +361,7 @@ class LayerViscosity(Layer):
 
     def _impact_layer(self,layer):
         if layer.__class__ == LayerObjects:
-            for obj in layer._objs:
+            for obj in layer.get_objs():
                 self._impact_obj(obj)
         elif layer.__class__ == LayerViscosity:
             self._impact_self()
@@ -580,6 +590,10 @@ if __name__ == '__main__':
     elif args.test == '9':
         layer_obj._create_obj(ObjectBot( pos = (10,20,0),radius = 4,speed = (1,1,1),energy = 0.2 ))
         layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (1,-1,0), energy = 0.9 ))
+    elif args.test == '10':
+        layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,0,0),energy = 0.2 ))
+        layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+
 
     layer_viscosity = LayerViscosity()
 
@@ -603,7 +617,7 @@ if __name__ == '__main__':
         if flags["drawinfo"]:
             h = h0
             sum = 0
-            for obj in layer_obj._objs:
+            for obj in layer_obj.get_objs():
                 screen.write((0,h),str(obj)+' ')
                 h += 1
                 sum += obj.speed[0].r*obj.mass
