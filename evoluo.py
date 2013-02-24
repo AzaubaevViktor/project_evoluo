@@ -121,90 +121,6 @@ class Screen:
         """ Деструктор класса """
         pass
 
-import curses
-
-class Curses(Screen):
-    def __init__(self):
-        global width, height
-        self.type = "Curses Screen"
-        self._scr = curses.initscr()
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
-        curses.init_pair(2, curses.COLOR_RED, curses.COLOR_WHITE)
-        curses.noecho()
-        curses.cbreak()
-        self._scr.keypad(1)
-        self._scr.clear()
-        self._scr.nodelay(1)
-        height,width = self._scr.getmaxyx()
-
-    def line(self,pos,vect,color):
-        def _from(a,b):
-            if a > b:
-                return reversed(range(b,a+1))
-            else:
-                return range(a,b+1)
-        x = [0,0]
-        y = [0,0]
-
-        x[0], y[0] = pos.x, pos.y
-        x[1], y[1] = vect.x + pos.x, vect.y + pos.y
-
-        if abs(y[1] - y[0]) < abs(x[1] - x[0]):
-            for _x in _from(0,int(x[1]-x[0])):
-                if (x[1] - x[0]) != 0:
-                    self.write(
-                        ( int(x[0] + _x), int( y[0] + (y[1]-y[0]) / (x[1]-x[0]) * _x )), '*', curses.color_pair(color)
-                        )
-        else:
-            for _y in _from(0,int(y[1]-y[0])):
-                if (y[1] - y[0]) != 0:
-                    self.write(
-                        ( int( x[0] + (x[1]-x[0]) / (y[1]-y[0]) * _y ), int(y[0] + _y) ), '*', curses.color_pair(color)
-                        )
-        pass
-        
-    def draw(self,layer):
-        if layer.__class__ == LayerObjects:
-            for obj in layer._objs:
-                # x,y = obj.get_pos()
-
-                def _wrt(x,y,obj):
-                    self.write((x,y),"%d" %(obj._energy / obj._max_energy*10) ,curses.A_REVERSE)
-
-                layer.get_under(obj.pos,obj.radius,_wrt,obj) # вырисовываем круг
-
-                self.line(obj.pos[0],Vector(obj.radius,obj.pos[1],isPolar = True),2)
-                self.line(obj.pos[0],obj.speed[0] * 3,1)
-
-                # сделать вывод скорости и ускорения
-        elif layer.__class__ == LayerViscosity:
-            pass
-
-    def update(self):
-        self._scr.refresh()
-
-    def clear(self):
-        for y in range(height):
-                self.write((0,y),' ' * width)
-        #self._scr.clear()
-
-    def write(self,pos,str,*attr):
-        self._scr.addstr(pos[1] % height,pos[0] % width,str,*attr)
-
-    def write_ch(self,pos,ch,*attr):
-        self._scr.addch(pos[1],pos[0],ch,*attr)
-
-    def getch(self):
-        return self._scr.getch()
-
-    def __del__(self):
-        curses.nocbreak()
-        curses.echo()
-        curses.endwin()
-        self._scr.keypad(0)
-        self._scr.nodelay(1)
-
 
 import tkinter
 
@@ -308,6 +224,7 @@ class LayerObjects(Layer):
         self.width = w
         self.height = h
         self._objs = []
+
     
     def _create_obj(self,obj):
         """ Создаёт объект """
