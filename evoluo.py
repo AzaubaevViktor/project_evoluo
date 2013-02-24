@@ -11,6 +11,12 @@ import time as time_
 import vect
 from vect import Vector
 
+def getpair(a,b): #костыль для быстродействия
+    if a>b:
+        return [b,a]
+    else:
+        return [a,b]
+
 def get_min_distance(param,p1,p2): #проверена
     """ Возвращает минимальное расстояние между двумя точками на поле """
     _p1 = [p1.x, p1.y]
@@ -270,7 +276,7 @@ class LayerObjects(Layer):
         self.width = w
         self.height = h
         self._objs = []
-        self._colliding = [] #сталкивающиеся объекты на данный момент
+        self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
     
     def _create_obj(self,obj):
         """ Создаёт объект """
@@ -285,13 +291,14 @@ class LayerObjects(Layer):
         """ Просчитывает скорости объектов
        РАсчёт коэффициента: 1.1"""
         p1 = self._objs[i].pos[0]
-        # w1 = self._objs[i].speed[1]
-        # m1 = self._objs[i].mass
+        w1 = self._objs[i].speed[1]
+        m1 = self._objs[i].mass
         p2 = self._objs[k].pos[0]
-        # w2 = self._objs[k].speed[1]
-        # m2 = self._objs[k].mass
+        w2 = self._objs[k].speed[1]
+        m2 = self._objs[k].mass
         #получаем вектор-прямую, на которую будут откладываться взаимодействующие вектора
         phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
+
         # Применяем ускорение
         def _get(m1,m2,v1,v2):
             """ уравнение полученных скоростей, чтобы по 10 раз не писать одно и то же """ 
@@ -315,6 +322,10 @@ class LayerObjects(Layer):
                 inside = (get_min_distance((self.width,self.height),self._objs[i].pos[0],self._objs[j].pos[0]) - (self._objs[i].radius+self._objs[j].radius)) / 2
                 if inside < 0:
                     self._collision(i,j,-inside)
+                    self._colliding[1].append(getpair(i,j)) # добавляет сталкивающиеся объекты в новый, чтобы на следующем шаге показать, что они уже сталкивались и надо их посильнее оттолкнуть
+        self._colliding[0] = copy.copy(self._colliding[1])
+        self._colliding[1] = []
+
 
     def step(self,layers):
         for layer in layers:
