@@ -212,12 +212,13 @@ class ScreenTkinter(Screen):    #TODO: Хуйнуть всё в Tkinter
     def __init__(self):
         """ Инициализирует экран """
         self.type = "Tkinter Screen"
-        root = tkinter.Tk() #Производим инициализацию нашего графического интерфейса
-        canvas = tkinter.Canvas(root, width=300, height=300) #Инициализируем Canvas размером 300х300 пикселей
-        canvas.pack() #Размещаем Canvas в окне нашего Tkinter-GUI
-        root.mainloop() # Создаем постоянный цикл
+        self.root = tkinter.Tk() #Производим инициализацию нашего графического интерфейса
+        self.canvas = tkinter.Canvas(root, width=300, height=300) #Инициализируем Canvas размером 300х300 пикселей
+        self.canvas.pack() #Размещаем Canvas в окне нашего Tkinter-GUI
+        self.root.mainloop() # Создаем постоянный цикл
+        self._objs = {}
         pass
-    def draw(self,layer):
+    def draw(self,layer,id):
         """ Расует слой """
         circle = canvas.create_oval(10,10,290,290, fill="blue")
         pass
