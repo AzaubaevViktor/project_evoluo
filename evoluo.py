@@ -121,6 +121,89 @@ class Screen:
         """ Деструктор класса """
         pass
 
+import curses
+
+class Curses(Screen):
+    def __init__(self):
+        global width, height
+        self.type = "Curses Screen"
+        self._scr = curses.initscr()
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
+        curses.init_pair(2, curses.COLOR_RED, curses.COLOR_WHITE)
+        curses.noecho()
+        curses.cbreak()
+        self._scr.keypad(1)
+        self._scr.clear()
+        self._scr.nodelay(1)
+        height,width = self._scr.getmaxyx()
+
+    def line(self,pos,vect,color):
+        def _from(a,b):
+            if a > b:
+                return reversed(range(b,a+1))
+            else:
+                return range(a,b+1)
+        x = [0,0]
+        y = [0,0]
+
+        x[0], y[0] = pos.x, pos.y
+        x[1], y[1] = vect.x + pos.x, vect.y + pos.y
+
+        if abs(y[1] - y[0]) < abs(x[1] - x[0]):
+            for _x in _from(0,int(x[1]-x[0])):
+                if (x[1] - x[0]) != 0:
+                    self.write(
+                        ( int(x[0] + _x), int( y[0] + (y[1]-y[0]) / (x[1]-x[0]) * _x )), '*', curses.color_pair(color)
+                        )
+        else:
+            for _y in _from(0,int(y[1]-y[0])):
+                if (y[1] - y[0]) != 0:
+                    self.write(
+                        ( int( x[0] + (x[1]-x[0]) / (y[1]-y[0]) * _y ), int(y[0] + _y) ), '*', curses.color_pair(color)
+                        )
+        pass
+        
+    def draw(self,layer):
+        if layer.__class__ == LayerObjects:
+            for obj in layer.get_objs():
+
+                def _wrt(x,y,obj):
+                    self.write((x,y),"%d" %(obj._energy / obj._max_energy*10) ,curses.A_REVERSE)
+
+                layer.get_under(obj.pos,obj.radius,_wrt,obj) # вырисовываем круг
+
+                self.line(obj.pos[0],Vector(obj.radius,obj.pos[1],isPolar = True),2)
+                self.line(obj.pos[0],obj.speed[0] * 3,1)
+
+                # сделать вывод скорости и ускорения
+        elif layer.__class__ == LayerViscosity:
+            pass
+
+    def update(self):
+        self._scr.refresh()
+
+    def clear(self):
+        for y in range(height):
+                self.write((0,y),' ' * width)
+        #self._scr.clear()
+
+    def write(self,pos,str,*attr):
+        self._scr.addstr(pos[1] % height,pos[0] % width,str,*attr)
+
+    def write_ch(self,pos,ch,*attr):
+        self._scr.addch(pos[1],pos[0],ch,*attr)
+
+    def getch(self):
+        return self._scr.getch()
+
+    def __del__(self):
+        curses.nocbreak()
+        curses.echo()
+        curses.endwin()
+        self._scr.keypad(0)
+        self._scr.nodelay(1)
+
 
 import tkinter
 
@@ -225,45 +308,46 @@ class LayerObjects(Layer):
         self.height = h
         self._objs = []
 
-    
     def _create_obj(self,obj):
         """ Создаёт объект """
-        self._objs.append(obj)
+        self._objs.append({"obj":obj,"id":random.random()})
+
+    def get_objs(self):
+        return [x["obj"] for x in self._objs]
 
     def _impact_layer(self,layer):
         """ Для каждого объекта внутри себя заставляет его обработать слой """
-        for obj in self._objs:
+        for obj in self.get_objs():
             obj.step(layer)
 
     def _collision(self,i,k,inside):
         """ Просчитывает скорости объектов
-       РАсчёт коэффициента: 1.1"""
-        p1 = self._objs[i].pos[0]
-        # w1 = self._objs[i].speed[1]
-        # m1 = self._objs[i].mass
-        p2 = self._objs[k].pos[0]
-        # w2 = self._objs[k].speed[1]
-        # m2 = self._objs[k].mass
+        РАсчёт коэффициента: 1.1"""
+        _objs = self.get_objs()
+        p1 = _objs[i].pos[0]
+        w1 = _objs[i].speed[1]
+        m1 = _objs[i].mass
+        p2 = _objs[k].pos[0]
+        w2 = _objs[k].speed[1]
+        m2 = _objs[k].mass
         #получаем вектор-прямую, на которую будут откладываться взаимодействующие вектора
         phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
         # Применяем ускорение
         F = Vector(inside * inside * dt * 50,phi,isPolar = True)
-        self._objs[i]._add_accel([-F,0])
-        self._objs[k]._add_accel([F,0])
+        _objs[i]._add_accel([-F,0])
+        _objs[k]._add_accel([F,0])
 
-        # self._objs[i].speed[1] += - w2 * m2 / m1 / 10 - w1 / 10 # сохраняем импульс и передаём 1/10 от угловой скорости
-        # self._objs[k].speed[1] += - w1 * m1 / m2 / 10 - w2 / 10
-        mass12 = self._objs[k].mass / self._objs[i].mass
-        self._objs[i].speed[1] -= (self._objs[k].speed[1] * mass12  + self._objs[i].speed[1]) / 10 * dt
-        self._objs[k].speed[1] -= (self._objs[i].speed[1] / mass12  + self._objs[k].speed[1]) / 10 * dt
+        mass12 = _objs[k].mass / _objs[i].mass
+        _objs[i].speed[1] -= (w2 * mass12 + w1) / 10 * dt # сохраняем импульс и передаём 1/10 от угловой скорости
+        _objs[k].speed[1] -= (w1 / mass12 + w2) / 10 * dt
 
     def collision(self):
         """ Определяет, сталкиваются ли объекты """
-        _objs = self._objs
+        _objs = self.get_objs()
         lenght = len(_objs)
         for i in range(lenght):
             for j in range(i+1,lenght):
-                inside = (get_min_distance((self.width,self.height),self._objs[i].pos[0],self._objs[j].pos[0]) - (self._objs[i].radius+self._objs[j].radius)) / 2
+                inside = (get_min_distance((self.width,self.height),_objs[i].pos[0],_objs[j].pos[0]) - (_objs[i].radius+_objs[j].radius)) / 2
                 if inside < 0:
                     self._collision(i,j,-inside)
 
@@ -291,7 +375,7 @@ class LayerViscosity(Layer):
 
     def _impact_layer(self,layer):
         if layer.__class__ == LayerObjects:
-            for obj in layer._objs:
+            for obj in layer.get_objs():
                 self._impact_obj(obj)
         elif layer.__class__ == LayerViscosity:
             self._impact_self()
@@ -543,7 +627,7 @@ if __name__ == '__main__':
         if flags["drawinfo"]:
             h = h0
             sum = 0
-            for obj in layer_obj._objs:
+            for obj in layer_obj.get_objs():
                 screen.write((0,h),str(obj)+' ')
                 h += 1
                 sum += obj.speed[0].r*obj.mass
