@@ -341,11 +341,17 @@ class LayerObjects(Layer):
         self._colliding[0] = copy.copy(self._colliding[1])
         self._colliding[1] = []
 
+    def _attack(self,i,j):
+        pass
+
+    def attack(self):
+        pass
 
     def step(self,layers):
         for layer in layers:
             self._impact_layer(layer)
         self.collision()
+        self.attack()
 
 
 class LayerViscosity(Layer):
@@ -379,7 +385,7 @@ class Mind:
     def step(self,args):
         move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),
             math.cos(args.get("energy",0) * args.get("radius",1)))
-        move = (0,0)
+        move = (1,0)
         attack = 1 # -- сила удара
         ferromons = (1,0,0,0) # 2^4 = 16 ферромонов, в данный момент он отдаёт ферромон 1000
         return {"move":move, "attack":attack, "ferromons": ferromons}
@@ -396,7 +402,8 @@ class Object: #TODO: ID к каждому новому объекту
             ,maxenergy:'Максимальная энергия' = 1
             ,speed:'Скорость' = (0,0,0) # мощь, угол; угловая скорость
             ,accelerate:'Ускорение' = (0,0) # мощь, угловое ускорение
-            ,radius:'радиус объекта' = 1):
+            ,radius:'радиус объекта' = 1,
+            **args):
         self.pos = [Vector(*pos[0:2]), pos[2]] #положение -- координата + угол
         self._energy = energy # Текущая энергия
         self._max_energy = maxenergy # максимальная энергия
@@ -433,9 +440,13 @@ class Object: #TODO: ID к каждому новому объекту
 
         k = dt / self.mass
 
+        omega *= self._get_strong()
+        accel *= self._get_strong()
+
         self.speed[1] += omega * k / math.pi / 10 #применяем угловое ускорение
 
         self.speed[0] += accel * k # применяем линейную скорости
+
         if abs(accel.r) > self._get_strong() > 0.1:
             self.energy(- abs((self._get_strong()-abs(accel.r))/accel.r))
 
@@ -461,7 +472,7 @@ class Object: #TODO: ID к каждому новому объекту
     def get_pos(self):
         return self.pos[0].x,self.pos[0].y
 
-    def _change_stat(self):
+    def _change_state(self):
         """ Изменяет статус в зависимости от параметров """
         self.status = 2
         if self._energy < self._max_energy*0.1:
@@ -472,7 +483,7 @@ class Object: #TODO: ID к каждому новому объекту
     def _impact_self(self):
         """ Шагает"""
         self._move()
-        self._change_stat()
+        self._change_state()
 
     def _impact_layer(self,layer):
         if layer.__class__ == LayerObjects:
@@ -487,6 +498,10 @@ class Object: #TODO: ID к каждому новому объекту
 
 class ObjectBot(Object):
     """ При прохождении по слою "полирует его" """
+    def __init__(self,**args):
+        Object.__init__(self,**args)
+        self._attack = 0 #сила атаки
+        self._attack_range = 1 #дальность атаки
 
     def add_accel(self,usk):
         """ Добавляет ускорение по повороту """
@@ -495,17 +510,20 @@ class ObjectBot(Object):
 
     def _impact_self(self):
         """ Вызывается, когда Родительский слой воздействует сам на себя """
-        if self.status == 2:
+        if self.status == 2: # Осторожно! РАБОТА МОЗГА
             state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":[0,0,0,0,0,0,0],"ferromons":(0,0,0,0)}
             ret =  self.mind.step(state)
         else:
             ret = {}
-        accel = [x * self._get_lifestate() for x in ret.get("move",(0,0))]
+        #Обработка результатов мозга
+        accel = [x for x in ret.get("move",(0,0))]
         self.add_accel(accel)
         self.energy(- ((abs(accel[0]) + abs(accel[1])) * self._get_strong()) / area)
+        self._attack = ret.get("attack",0)
+        # применение
         self.apply_accel()
         self._move()
-        self._change_stat()
+        self._change_state()
 
     def _impact_layer(self,layer):
         """ Воздействует на слои """
@@ -656,4 +674,4 @@ if __name__ == '__main__':
         ch = screen.getch()
         #screen.scr.addstr(22,0,str(c))
     del screen
-    print("==================\nTicks = %d, half FPS: %.3f, last FPS: %.3f\n Width:%d, Height:%d" %(tick,fps,last_fps,width,height))
+    print("===========================================\nTicks = %d, half FPS: %.3f, last FPS: %.3f\n Width:%d, Height:%d" %(tick,fps,last_fps,width,height))
