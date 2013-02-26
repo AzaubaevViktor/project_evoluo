@@ -175,12 +175,12 @@ class Curses(Screen):
             for obj in layer.get_objs():
 
                 def _wrt(x,y,obj):
-                    self.write((x,y),"%d" %(obj._energy / obj._max_energy*10) ,curses.A_REVERSE)
+                    self.write((x,y)," ",curses.A_REVERSE)
 
                 layer.get_under(obj.pos,obj.radius,_wrt,obj) # вырисовываем круг
-
                 self.line(obj.pos[0],Vector(obj.radius,obj.pos[1],isPolar = True),2)
                 self.line(obj.pos[0],obj.speed[0] * 3,1)
+                self.write((int(obj.pos[0].x),int(obj.pos[0].y)),"%d" %(obj._get_lifestate()*10),curses.A_REVERSE)
 
                 # сделать вывод скорости и ускорения
         elif layer.__class__ == LayerViscosity:
@@ -273,15 +273,18 @@ class LayerObjects(Layer):
             h = height
         self.width = w
         self.height = h
-        self._objs = []
+        self._objs = {}
         self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
 
     def _create_obj(self,obj):
         """ Создаёт объект """
-        self._objs.append({"obj":obj,"id":random.random()})
+        self._objs.update({random.randint(0,10000000):obj})
 
     def get_objs(self):
-        return [x["obj"] for x in self._objs]
+        return list(self._objs.values())
+
+    def get_obj_by_id(self,id):
+        return self._objs.get(id,None)
 
     def _impact_layer(self,layer):
         """ Для каждого объекта внутри себя заставляет его обработать слой """
@@ -312,21 +315,27 @@ class LayerObjects(Layer):
             v2.phi -= phi
             _v1 = v1.copy()
             _v2 = v2.copy()
-            _v1.x = _get(m1,m2,v1.x,v2.x) # взаимодействуют
-            _v2.x = _get(m2,m1,v2.x,v1.x)
+            V1before = _v1.x
+            V2before = _v2.x
+            V1after = _v1.x = _get(m1,m2,v1.x,v2.x) # взаимодействуют
+            V2after = _v2.x = _get(m2,m1,v2.x,v1.x)
             _v1.phi += phi #поворачиваем обратно
             _v2.phi += phi
             _objs[i].speed[0] = _v1
             _objs[k].speed[0] = _v2
 
             mass12 = _objs[k].mass / _objs[i].mass
-            _objs[i].speed[1] -= (w2 * mass12 + w1) / 10 * dt # сохраняем импульс и передаём 1/10 от угловой скорости
-            _objs[k].speed[1] -= (w1 / mass12 + w2) / 10 * dt
+            _objs[i].speed[1] -= (w2 * mass12 + w1) / 10 # сохраняем импульс и передаём 1/10 от угловой скорости FACTOR
+            _objs[k].speed[1] -= (w1 / mass12 + w2) / 10
+
+            if (V1after-V1before)*m1>_objs[i]._get_strong():
+                _objs[i].energy(-((V1after-V1before)*m1-_objs[i]._get_strong()))
+            if (V2after-V2before)*m2>_objs[k]._get_strong():
+                _objs[k].energy(-((V2after-V2before)*m2-_objs[k]._get_strong()))
         else:
             F = Vector(inside,phi,isPolar = True)
             _objs[i]._add_accel([-F,0]) #добавляем ускорение
             _objs[k]._add_accel([F,0])
-
 
     def collision(self):
         """ Определяет, сталкиваются ли объекты """
@@ -356,10 +365,10 @@ class LayerObjects(Layer):
 
 class LayerViscosity(Layer):
     """ Замедляет объекты. Работает по принципу больше скорость -- больше сила трения
-    !!! Сделать работу не через скорость, а через ускорение"""
+    #FIXME: не замедляет (общий импульс системы и скорость не уменьшаются, если dt > 0.3 """
     def __init__(self,**args):
         Layer.__init__(self,max = 0.1, type = 'none', **args)
-        self.mu = args.get('mu',0.01) #коэффициент трения
+        self.mu = args.get('mu',0.01) #коэффициент трения FACTOR
 
     def _impact_obj(self,obj):
         """ Как слой с замедлениями влияет на объект, зависит от времени """
@@ -402,8 +411,9 @@ class Object: #TODO: ID к каждому новому объекту
             ,maxenergy:'Максимальная энергия' = 1
             ,speed:'Скорость' = (0,0,0) # мощь, угол; угловая скорость
             ,accelerate:'Ускорение' = (0,0) # мощь, угловое ускорение
-            ,radius:'радиус объекта' = 1,
-            **args):
+            ,radius:'радиус объекта' = 1
+            ,strong:'Защита и сила; от неё зависят многие параметры' = 1
+            ,**args):
         self.pos = [Vector(*pos[0:2]), pos[2]] #положение -- координата + угол
         self._energy = energy # Текущая энергия
         self._max_energy = maxenergy # максимальная энергия
@@ -412,9 +422,10 @@ class Object: #TODO: ID к каждому новому объекту
         self.radius = radius # радиус
         self.mass = radius ** 2 # масса
         self.status = 2 # статус
+        self._strong = strong #Защита и сила
         self.mind = mind(initmnd) # Мозги
 
-    def _move(self): #checked
+    def _move(self): 
         """ Передвигает объект на вектор """
         self.pos[1] += self.speed[1] * dt # угловая скорость
         self.pos[1] %= 2*math.pi
@@ -423,9 +434,9 @@ class Object: #TODO: ID к каждому новому объекту
         self.pos[0].x %= width
         self.pos[0].y %= height
 
-    def _get_strong(self): #checked
+    def _get_strong(self):
         """ Возвращает текущую силу, которая зависит от многих параметров. Чем больше максимальная энергия -- тем сильнее организм, поэтому energy/maxenergy * maxenergy = energy """
-        return self._energy
+        return self._energy*self._strong
 
     def _get_lifestate(self):
         return self._energy / self._max_energy
@@ -440,15 +451,9 @@ class Object: #TODO: ID к каждому новому объекту
 
         k = dt / self.mass
 
-        omega *= self._get_strong()
-        accel *= self._get_strong()
-
-        self.speed[1] += omega * k / math.pi / 10 #применяем угловое ускорение
+        self.speed[1] += omega * k / math.pi / 10 #применяем угловое ускорение FACTOR
 
         self.speed[0] += accel * k # применяем линейную скорости
-
-        if abs(accel.r) > self._get_strong() > 0.1:
-            self.energy(- abs((self._get_strong()-abs(accel.r))/accel.r))
 
         self._accel = [vect.null(),0]
 
@@ -460,6 +465,8 @@ class Object: #TODO: ID к каждому новому объекту
     def energy(self,de): # зависит от времени
         """ Управление энергией """
         self._energy += de * dt
+        if de < 0:
+            self._strong += -de*dt / 100 # FACTOR
         return_energy = 0
         if self._energy > self._max_energy:
             return_energy = self._energy - self._max_energy 
@@ -475,7 +482,7 @@ class Object: #TODO: ID к каждому новому объекту
     def _change_state(self):
         """ Изменяет статус в зависимости от параметров """
         self.status = 2
-        if self._energy < self._max_energy*0.1:
+        if self._energy < self._max_energy*0.1: #FACTOR
             self.status = 1
         elif self._energy < 0.:
             self.status = 0
@@ -493,7 +500,7 @@ class Object: #TODO: ID к каждому новому объекту
         self._impact_layer(layer)
 
     def __str__(self):
-        return "Pos: (%3d,%3d;%1.2f); Pow: %.2f/%.2f; Sp: w:%2.4f; a:%1.1f; om:%2.4f; M:%2d St: %d" %(self.pos[0].x,self.pos[0].y,self.pos[1],self._energy,self._max_energy,self.speed[0].r,self.speed[0].phi/math.pi*180,self.speed[1],self.mass,self.status)
+        return "Pos: (%3d,%3d;%1.2f); Pow: %.2f/%.2f; Sp: w:%2.4f; a:%1.1f; om:%2.4f; M:%2d Str: %1.4f St: %d" %(self.pos[0].x,self.pos[0].y,self.pos[1],self._energy,self._max_energy,self.speed[0].r,self.speed[0].phi/math.pi*180,self.speed[1],self.mass,self._strong,self.status)
 
 
 class ObjectBot(Object):
@@ -516,9 +523,9 @@ class ObjectBot(Object):
         else:
             ret = {}
         #Обработка результатов мозга
-        accel = [x for x in ret.get("move",(0,0))]
-        self.add_accel(accel)
-        self.energy(- ((abs(accel[0]) + abs(accel[1])) * self._get_strong()) / area)
+        accel = [x * self._get_strong() for x in ret.get("move",(0,0))]
+        self.add_accel(accel) # применяет ускорение
+        self.energy(- ((abs(accel[0]) + abs(accel[1])) * self._get_strong()) / area) #вычитает энергию в зависимости от площади
         self._attack = ret.get("attack",0)
         # применение
         self.apply_accel()
@@ -585,7 +592,7 @@ if __name__ == '__main__':
     layer_obj = LayerObjects()
 
     if args.test == None:
-        for i in range(20):
+        for i in range(random.randint(1,50)):
             layer_obj._create_obj(ObjectBot(pos = (random.randint(0,width-1),random.randint(0,height-1),random.random()),energy = random.random(),maxenergy = random.random(),radius = random.random()*7+1))
     elif args.test == '1':
         layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
@@ -620,7 +627,7 @@ if __name__ == '__main__':
         layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.2 ))
         layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,1,0), energy = 0.9 ))
     elif args.test == '12':
-        layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.2 ))
+        layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.9 ))
         layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,-1,0), energy = 0.9 ))
 
     layer_viscosity = LayerViscosity()
@@ -650,7 +657,7 @@ if __name__ == '__main__':
                 h += 1
                 sum += obj.speed[0].r*obj.mass
             screen.write((0,h),'Общий импульс системы:'+str(sum))
-            screen.write((0,h+1),'tick: %d; time: %.2f; half fps: %.2f; last fps: %.2f' % (tick,t2-t1,fps,last_fps))
+            screen.write((0,h+1),'tick: %d; Gtime: %.2f; half fps: %.2f; last fps: %.2f' % (tick,tick*dt,fps,last_fps))
 
         screen.draw(layer_obj)
 
