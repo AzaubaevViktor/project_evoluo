@@ -178,7 +178,7 @@ class Curses(Screen):
                     self.write((x,y)," ",curses.A_REVERSE)
 
                 layer.get_under(obj.pos,obj.radius,_wrt,obj) # вырисовываем круг
-                self.line(obj.pos[0],Vector(obj.radius,obj.pos[1],isPolar = True),2)
+                self.line(obj.pos[0],Vector(obj.radius+obj._attack_range*obj._attack,obj.pos[1],isPolar = True),2)
                 self.line(obj.pos[0],obj.speed[0] * 3,1)
                 self.write((int(obj.pos[0].x),int(obj.pos[0].y)),"%d" %(obj._get_lifestate()*10),curses.A_REVERSE)
 
@@ -328,10 +328,10 @@ class LayerObjects(Layer):
             _objs[i].speed[1] -= (w2 * mass12 + w1) / 10 # сохраняем импульс и передаём 1/10 от угловой скорости FACTOR
             _objs[k].speed[1] -= (w1 / mass12 + w2) / 10
 
-            if (V1after-V1before)*m1>_objs[i]._get_strong():
-                _objs[i].energy(-((V1after-V1before)*m1-_objs[i]._get_strong()))
-            if (V2after-V2before)*m2>_objs[k]._get_strong():
-                _objs[k].energy(-((V2after-V2before)*m2-_objs[k]._get_strong()))
+            if (V1after-V1before)/m1>_objs[i].get_strong():
+                _objs[i].energy(-((V1after-V1before)-_objs[i].get_strong()/m1))
+            if (V2after-V2before)/m2>_objs[k].get_strong():
+                _objs[k].energy(-((V2after-V2before)-_objs[k].get_strong()/m2))
         else:
             F = Vector(inside,phi,isPolar = True)
             _objs[i]._add_accel([-F,0]) #добавляем ускорение
@@ -350,11 +350,31 @@ class LayerObjects(Layer):
         self._colliding[0] = copy.copy(self._colliding[1])
         self._colliding[1] = []
 
-    def _attack(self,i,j):
-        pass
+    def _attack(self,a,b):
+        #Расчёт того, насколько глубоко проник удар
+        OO = Vector(b.pos[0].x-a.pos[0].x, b.pos[0].y-a.pos[0].y, isPolar = False) # Вектор, соединяющий центры ботов
+        at = Vector(a.radius + a._attack * a._attack_range * a.get_strong(), a.pos[1], isPolar = True) #вектор атаки
+        phi = OO.phi - at.phi # угол
+        ah = Vector(math.cos(phi)*OO.r, at.phi, isPolar = True) # вектор до высоты, опущенной из центра b
+        f_at = at.r-ah.r # первая часть проникновения
+        OH = (OO - ah).r # длинна высота из центра b
+        if OH < b.radius:
+            f_at += math.sqrt(b.radius*b.radius - OH*OH)
+            if f_at > 0:
+                f_at *= a._attack * a.get_strong() #вычисляем силу атаки, заглушка
+                b.energy (- f_at)
+
 
     def attack(self):
-        pass
+        _objs = self.get_objs()
+        lenght = len(_objs)
+        for a in _objs:
+            for b in _objs:
+                if (a != b):
+                    inside = (get_min_distance((self.width,self.height),a.pos[0],b.pos[0]) - (a.radius+b.radius)) / 2
+                    if inside < a._attack_range:
+                        self._attack(a,b) # Атакует a
+
 
     def step(self,layers):
         for layer in layers:
@@ -394,13 +414,13 @@ class Mind:
     def step(self,args):
         move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),
             math.cos(args.get("energy",0) * args.get("radius",1)))
-        move = (1,0)
+        move = (0,0)
         attack = 1 # -- сила удара
         ferromons = (1,0,0,0) # 2^4 = 16 ферромонов, в данный момент он отдаёт ферромон 1000
         return {"move":move, "attack":attack, "ferromons": ferromons}
 
 
-class Object: #TODO: ID к каждому новому объекту
+class Object: 
     """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив \n
     !!!!Переписать: то что нужно, оставить здесь, всё остальное вынести в уже класс ObjectBot, который будет прототипом бота. Здесь же учесть нужно лишь _общие_ моменты объектов, и не засорять, т.к. у нас будут ещё и твёрдые вещества, и всё что угодно"""
     def __init__(self
@@ -413,6 +433,7 @@ class Object: #TODO: ID к каждому новому объекту
             ,accelerate:'Ускорение' = (0,0) # мощь, угловое ускорение
             ,radius:'радиус объекта' = 1
             ,strong:'Защита и сила; от неё зависят многие параметры' = 1
+            ,attack_range: 'Дальность атаки' = 1
             ,**args):
         self.pos = [Vector(*pos[0:2]), pos[2]] #положение -- координата + угол
         self._energy = energy # Текущая энергия
@@ -424,6 +445,8 @@ class Object: #TODO: ID к каждому новому объекту
         self.status = 2 # статус
         self._strong = strong #Защита и сила
         self.mind = mind(initmnd) # Мозги
+        self._attack = 0 #сила атаки
+        self._attack_range = attack_range #дальность атаки
 
     def _move(self): 
         """ Передвигает объект на вектор """
@@ -434,7 +457,7 @@ class Object: #TODO: ID к каждому новому объекту
         self.pos[0].x %= width
         self.pos[0].y %= height
 
-    def _get_strong(self):
+    def get_strong(self):
         """ Возвращает текущую силу, которая зависит от многих параметров. Чем больше максимальная энергия -- тем сильнее организм, поэтому energy/maxenergy * maxenergy = energy """
         return self._energy*self._strong
 
@@ -449,7 +472,7 @@ class Object: #TODO: ID к каждому новому объекту
         global dt, width, height
         accel, omega = self._accel
 
-        k = dt / self.mass
+        k = dt / self.mass * self.get_strong()
 
         self.speed[1] += omega * k / math.pi / 10 #применяем угловое ускорение FACTOR
 
@@ -465,7 +488,7 @@ class Object: #TODO: ID к каждому новому объекту
     def energy(self,de): # зависит от времени
         """ Управление энергией """
         self._energy += de * dt
-        if de < 0:
+        if (de < 0) and (self.status > 1):
             self._strong += -de*dt / 100 # FACTOR
         return_energy = 0
         if self._energy > self._max_energy:
@@ -500,16 +523,11 @@ class Object: #TODO: ID к каждому новому объекту
         self._impact_layer(layer)
 
     def __str__(self):
-        return "Pos: (%3d,%3d;%1.2f); Pow: %.2f/%.2f; Sp: w:%2.4f; a:%1.1f; om:%2.4f; M:%2d Str: %1.4f St: %d" %(self.pos[0].x,self.pos[0].y,self.pos[1],self._energy,self._max_energy,self.speed[0].r,self.speed[0].phi/math.pi*180,self.speed[1],self.mass,self._strong,self.status)
+        return "Pos: (%3d,%3d;%1.2f); Pow: %.2f/%.2f; Sp: w:%2.4f; a:%3.1f; om:%2.4f; M:%3d A:%1.4f Str: %1.4f St: %d" %(self.pos[0].x,self.pos[0].y,self.pos[1],self._energy,self._max_energy,self.speed[0].r,self.speed[0].phi/math.pi*180,self.speed[1],self.mass,self._attack * self._attack_range * self.get_strong(),self._strong,self.status)
 
 
 class ObjectBot(Object):
     """ При прохождении по слою "полирует его" """
-    def __init__(self,**args):
-        Object.__init__(self,**args)
-        self._attack = 0 #сила атаки
-        self._attack_range = 1 #дальность атаки
-
     def add_accel(self,usk):
         """ Добавляет ускорение по повороту """
         accel, omega = usk
@@ -523,14 +541,17 @@ class ObjectBot(Object):
         else:
             ret = {}
         #Обработка результатов мозга
-        accel = [x * self._get_strong() for x in ret.get("move",(0,0))]
+        accel = [x * self.get_strong() for x in ret.get("move",(0,0))]
         self.add_accel(accel) # применяет ускорение
-        self.energy(- ((abs(accel[0]) + abs(accel[1])) * self._get_strong()) / area) #вычитает энергию в зависимости от площади
-        self._attack = ret.get("attack",0)
+        self.energy(- (abs(accel[0]) + abs(accel[1])) / area) #вычитает энергию в зависимости от площади
+        self._attack = ret.get("attack",0) # забирает силу атаки
+        self.energy(- self._attack * self._attack_range * self.get_strong() / 10) #забирает энергию на работу атаки FACTOR: При силе удара 1 и длинне 1 при жизни 1 он способен бить 10 тиков не переставая 
         # применение
         self.apply_accel()
         self._move()
         self._change_state()
+
+        #self._attack = 0 # обнуляем
 
     def _impact_layer(self,layer):
         """ Воздействует на слои """
@@ -557,8 +578,8 @@ def info():
         h += 1
     screen.write((0,h),'tick: %d; time: %.2f; half fps: %.2f; last fps: %.2f' % (tick,t2-t1,fps,last_fpc))
 
-width = 30
-height = 30
+width = 100
+height = 100
 
 if __name__ == '__main__':
 
@@ -602,23 +623,23 @@ if __name__ == '__main__':
         layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (2,0,1),energy = 0.99 ))
         layer_obj._create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.99 ))
     elif args.test == '3':
-        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
+        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.3 ))
     elif args.test == '4':
-        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (-1,0,0),energy = 0.9 ))
+        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (-1,0,0),energy = 0.4 ))
     elif args.test == '5':
-        layer_obj._create_obj(ObjectBot( pos = (10,10,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
+        layer_obj._create_obj(ObjectBot( pos = (10,10,0),radius = 5,speed = (1,0,0),energy = 0.5 ))
         layer_obj._create_obj(ObjectBot( pos = (30,30,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
     elif args.test == '6':
-        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (1,0,1),energy = 0.2 ))
+        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (1,0,1),energy = 0.6 ))
         layer_obj._create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
     elif args.test == '7':
-        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (6,0,1),energy = 0.2 ))
+        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (6,0,1),energy = 0.7 ))
         layer_obj._create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-1,0,0), energy = 0.9 ))
     elif args.test == '8':
-        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 4,speed = (1,0,1),energy = 0.2 ))
+        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 4,speed = (1,0,1),energy = 0.8 ))
         layer_obj._create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-0.5,0,0), energy = 0.9 ))
     elif args.test == '9':
-        layer_obj._create_obj(ObjectBot( pos = (10,20,0),radius = 4,speed = (1,1,1),energy = 0.2 ))
+        layer_obj._create_obj(ObjectBot( pos = (10,20,0),radius = 4,speed = (1,1,1),energy = 0.9 ))
         layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (1,-1,0), energy = 0.9 ))
     elif args.test == '10':
         layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,0,0),energy = 0.2 ))
@@ -629,6 +650,9 @@ if __name__ == '__main__':
     elif args.test == '12':
         layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.9 ))
         layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,-1,0), energy = 0.9 ))
+    elif args.test == '13':
+        layer_obj._create_obj(ObjectBot( pos = (13,38,math.pi*2/3),radius = 4,speed = (0,1,0),energy = 0.9, maxenergy = 1 ))
+        layer_obj._create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
 
     layer_viscosity = LayerViscosity()
 
