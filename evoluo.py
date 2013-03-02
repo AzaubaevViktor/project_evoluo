@@ -351,7 +351,7 @@ class LayerObjects(Layer):
         self._colliding[1] = []
 
     def _attack(self,a,b):
-        #Расчёт того, насколько глубоко проник удар
+        #Расчёт того, насколько глубоко проник удар I.3
         OO = Vector(b.pos[0].x-a.pos[0].x, b.pos[0].y-a.pos[0].y, isPolar = False) # Вектор, соединяющий центры ботов
         at = Vector(a.radius + a._attack * a._attack_range * a.get_strong(), a.pos[1], isPolar = True) #вектор атаки
         phi = OO.phi - at.phi # угол
@@ -359,10 +359,17 @@ class LayerObjects(Layer):
         f_at = at.r-ah.r # первая часть проникновения
         OH = (OO - ah).r # длинна высота из центра b
         if OH < b.radius:
-            f_at += math.sqrt(b.radius*b.radius - OH*OH)
+            BH = math.sqrt(b.radius*b.radius - OH*OH)
+            f_at += BH
             if f_at > 0:
+                # pdb.set_trace()
                 f_at *= a._attack * a.get_strong() #вычисляем силу атаки, заглушка
+                if BH > 0.001: # вычисляем угловое ускорение
+                    omega = f_at * math.sin(math.atan(OH/BH)) # учитываем энергию a и силу удара
+                else:
+                    omega = 0
                 b.energy (- f_at)
+                b._add_accel((OO.one() * f_at, omega)) #отталкиваем и крутим противника
 
 
     def attack(self):
@@ -388,7 +395,7 @@ class LayerViscosity(Layer):
     #FIXME: не замедляет (общий импульс системы и скорость не уменьшаются, если dt > 0.3 """
     def __init__(self,**args):
         Layer.__init__(self,max = 0.1, type = 'none', **args)
-        self.mu = args.get('mu',0.01) #коэффициент трения FACTOR
+        self.mu = args.get('mu',0.1) #коэффициент трения FACTOR
 
     def _impact_obj(self,obj):
         """ Как слой с замедлениями влияет на объект, зависит от времени """
@@ -412,10 +419,9 @@ class Mind:
     def __init__(self,init):
         pass
     def step(self,args):
-        move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),
-            math.cos(args.get("energy",0) * args.get("radius",1)))
-        move = (0,0)
-        attack = 1 # -- сила удара
+        move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),0)
+        #move = (0,0)
+        attack = 0.1 # -- сила удара
         ferromons = (1,0,0,0) # 2^4 = 16 ферромонов, в данный момент он отдаёт ферромон 1000
         return {"move":move, "attack":attack, "ferromons": ferromons}
 
@@ -472,7 +478,7 @@ class Object:
         global dt, width, height
         accel, omega = self._accel
 
-        k = dt / self.mass * self.get_strong()
+        k = dt / self.mass
 
         self.speed[1] += omega * k / math.pi / 10 #применяем угловое ускорение FACTOR
 
@@ -505,10 +511,10 @@ class Object:
     def _change_state(self):
         """ Изменяет статус в зависимости от параметров """
         self.status = 2
-        if self._energy < self._max_energy*0.1: #FACTOR
-            self.status = 1
-        elif self._energy < 0.:
+        if self._energy < self._max_energy*0.05: #FACTOR
             self.status = 0
+        elif self._energy < self._max_energy*0.1 : #FACTOR
+            self.status = 1
 
     def _impact_self(self):
         """ Шагает"""
@@ -523,11 +529,10 @@ class Object:
         self._impact_layer(layer)
 
     def __str__(self):
-        return "Pos: (%3d,%3d;%1.2f); Pow: %.2f/%.2f; Sp: w:%2.4f; a:%3.1f; om:%2.4f; M:%3d A:%1.4f Str: %1.4f St: %d" %(self.pos[0].x,self.pos[0].y,self.pos[1],self._energy,self._max_energy,self.speed[0].r,self.speed[0].phi/math.pi*180,self.speed[1],self.mass,self._attack * self._attack_range * self.get_strong(),self._strong,self.status)
+        return "Pos: (%3d,%3d;%3.f); Pow: %.2f/%.2f; Sp: [w:%2.4f; a:%3.f om:%3.f] M:%3d [A:%1.4f Str: %1.4f] St: %d" %(self.pos[0].x,self.pos[0].y,(self.pos[1]/math.pi*180),self._energy,self._max_energy,self.speed[0].r,(self.speed[0].phi/math.pi*180),(self.speed[1]/math.pi*180),self.mass,self._attack * self._attack_range * self.get_strong(),self._strong,self.status)
 
 
 class ObjectBot(Object):
-    """ При прохождении по слою "полирует его" """
     def add_accel(self,usk):
         """ Добавляет ускорение по повороту """
         accel, omega = usk
@@ -652,6 +657,9 @@ if __name__ == '__main__':
         layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,-1,0), energy = 0.9 ))
     elif args.test == '13':
         layer_obj._create_obj(ObjectBot( pos = (13,38,math.pi*2/3),radius = 4,speed = (0,1,0),energy = 0.9, maxenergy = 1 ))
+        layer_obj._create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
+    elif args.test == '14':
+        layer_obj._create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
         layer_obj._create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
 
     layer_viscosity = LayerViscosity()
