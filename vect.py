@@ -164,6 +164,10 @@ class Vector:
         self._cartesian_to_polar()
         return ({"x":self.a[0],"y":self.a[1],"r":self.a[2],"phi":self.a[3]}.__str__())
 
+    def one(self):
+        """ Возвращает единичный вектор """
+        return Vector(1,self.phi,isPolar = True)
+
     def copy(self):
         if self.a[4]:
             return Vector(self.a[0],self.a[1],isPolar = False)

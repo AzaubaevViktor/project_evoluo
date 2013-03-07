@@ -244,7 +244,6 @@ class Layer:
             y %= self.height
             func(x,y,*args)
 
-
     def get_under_summ(self,pos,R):
         s = [0]
         def _summ(x,y,s,self):
@@ -261,7 +260,6 @@ class Layer:
         for layer in layers:
             self._impact_layer(layer)
 
-
 class LayerObjects(Layer):
     """ Необычный класс, который вмещает в себя всех живых существ и делает вид, что он обычный класс \n
     Содержит в себе, в отличие от обычного класса слоя, не слой WxH, а объекты, которые взаимодействуют со средой"""
@@ -276,7 +274,7 @@ class LayerObjects(Layer):
         self._objs = {}
         self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
 
-    def _create_obj(self,obj):
+    def create_obj(self,obj):
         """ Создаёт объект """
         self._objs.update({random.randint(0,10000000):obj})
 
@@ -363,7 +361,7 @@ class LayerObjects(Layer):
             f_at += BH
             if f_at > 0:
                 # pdb.set_trace()
-                f_at *= a._attack * a.get_strong() #вычисляем силу атаки, заглушка
+                f_at *= a._attack * a.get_strong() #вычисляем силу атаки
                 if BH > 0.001: # вычисляем угловое ускорение
                     omega = f_at * math.sin(math.atan(OH/BH)) # учитываем энергию a и силу удара
                 else:
@@ -402,22 +400,17 @@ class LayerViscosity(Layer):
         ds = obj.mass * self.mu
         obj._add_accel([- obj.speed[0] * ds, - obj.speed[1] * ds])
 
-    def _impact_self(self):
-        """ Как слой изменяется """
-        pass # да никак
-
     def _impact_layer(self,layer):
         if layer.__class__ == LayerObjects:
             for obj in layer.get_objs():
                 self._impact_obj(obj)
-        elif layer.__class__ == LayerViscosity:
-            self._impact_self()
 
 
 class Mind:
     """ (Тестовый) Суперкласс разума. На вход подаются данные с датчиков, на выход -- действия """
     def __init__(self,init):
         pass
+
     def step(self,args):
         move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),0)
         #move = (0,0)
@@ -427,8 +420,7 @@ class Mind:
 
 
 class Object: 
-    """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив \n
-    !!!!Переписать: то что нужно, оставить здесь, всё остальное вынести в уже класс ObjectBot, который будет прототипом бота. Здесь же учесть нужно лишь _общие_ моменты объектов, и не засорять, т.к. у нас будут ещё и твёрдые вещества, и всё что угодно"""
+    """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив"""
     def __init__(self
             ,pos:'местоположение' = (0,0,0) # x,y; угол
             ,mind:'Мозги' = Mind
@@ -450,7 +442,7 @@ class Object:
         self.mass = radius ** 2 # масса
         self.status = 2 # статус
         self._strong = strong #Защита и сила
-        self.mind = mind(initmnd) # Мозги
+        self._mind = mind(initmnd) # Мозги
         self._attack = 0 #сила атаки
         self._attack_range = attack_range #дальность атаки
 
@@ -511,9 +503,9 @@ class Object:
     def _change_state(self):
         """ Изменяет статус в зависимости от параметров """
         self.status = 2
-        if self._energy < self._max_energy*0.05: #FACTOR
+        if self._energy < self._max_energy * 0.05: #FACTOR
             self.status = 0
-        elif self._energy < self._max_energy*0.1 : #FACTOR
+        elif self._energy < self._max_energy * 0.1 : #FACTOR
             self.status = 1
 
     def _impact_self(self):
@@ -542,7 +534,7 @@ class ObjectBot(Object):
         """ Вызывается, когда Родительский слой воздействует сам на себя """
         if self.status == 2: # Осторожно! РАБОТА МОЗГА
             state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":[0,0,0,0,0,0,0],"ferromons":(0,0,0,0)}
-            ret =  self.mind.step(state)
+            ret =  self._mind.step(state)
         else:
             ret = {}
         #Обработка результатов мозга
@@ -619,48 +611,48 @@ if __name__ == '__main__':
 
     if args.test == None:
         for i in range(random.randint(1,50)):
-            layer_obj._create_obj(ObjectBot(pos = (random.randint(0,width-1),random.randint(0,height-1),random.random()),energy = random.random(),maxenergy = random.random(),radius = random.random()*7+1))
+            layer_obj.create_obj(ObjectBot(pos = (random.randint(0,width-1),random.randint(0,height-1),random.random()),energy = random.random(),maxenergy = random.random(),radius = random.random()*7+1))
     elif args.test == '1':
-        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
-        layer_obj._create_obj(ObjectBot( pos = (40,40,0),radius = 5,speed = (-1,0,-1), energy = 0.9 ))
-        layer_obj._create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (40,40,0),radius = 5,speed = (-1,0,-1), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
     elif args.test == '2':
-        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (2,0,1),energy = 0.99 ))
-        layer_obj._create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.99 ))
+        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (2,0,1),energy = 0.99 ))
+        layer_obj.create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.99 ))
     elif args.test == '3':
-        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.3 ))
+        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.3 ))
     elif args.test == '4':
-        layer_obj._create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (-1,0,0),energy = 0.4 ))
+        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (-1,0,0),energy = 0.4 ))
     elif args.test == '5':
-        layer_obj._create_obj(ObjectBot( pos = (10,10,0),radius = 5,speed = (1,0,0),energy = 0.5 ))
-        layer_obj._create_obj(ObjectBot( pos = (30,30,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,10,0),radius = 5,speed = (1,0,0),energy = 0.5 ))
+        layer_obj.create_obj(ObjectBot( pos = (30,30,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
     elif args.test == '6':
-        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (1,0,1),energy = 0.6 ))
-        layer_obj._create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (1,0,1),energy = 0.6 ))
+        layer_obj.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
     elif args.test == '7':
-        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (6,0,1),energy = 0.7 ))
-        layer_obj._create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-1,0,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (6,0,1),energy = 0.7 ))
+        layer_obj.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-1,0,0), energy = 0.9 ))
     elif args.test == '8':
-        layer_obj._create_obj(ObjectBot( pos = (30,40,0),radius = 4,speed = (1,0,1),energy = 0.8 ))
-        layer_obj._create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-0.5,0,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (30,40,0),radius = 4,speed = (1,0,1),energy = 0.8 ))
+        layer_obj.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-0.5,0,0), energy = 0.9 ))
     elif args.test == '9':
-        layer_obj._create_obj(ObjectBot( pos = (10,20,0),radius = 4,speed = (1,1,1),energy = 0.9 ))
-        layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (1,-1,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,20,0),radius = 4,speed = (1,1,1),energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (1,-1,0), energy = 0.9 ))
     elif args.test == '10':
-        layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,0,0),energy = 0.2 ))
-        layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,0,0),energy = 0.2 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
     elif args.test == '11':
-        layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.2 ))
-        layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,1,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.2 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,1,0), energy = 0.9 ))
     elif args.test == '12':
-        layer_obj._create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.9 ))
-        layer_obj._create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,-1,0), energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.9 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,-1,0), energy = 0.9 ))
     elif args.test == '13':
-        layer_obj._create_obj(ObjectBot( pos = (13,38,math.pi*2/3),radius = 4,speed = (0,1,0),energy = 0.9, maxenergy = 1 ))
-        layer_obj._create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
+        layer_obj.create_obj(ObjectBot( pos = (13,38,math.pi*2/3),radius = 4,speed = (0,1,0),energy = 0.9, maxenergy = 1 ))
+        layer_obj.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
     elif args.test == '14':
-        layer_obj._create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
-        layer_obj._create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
+        layer_obj.create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
+        layer_obj.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
 
     layer_viscosity = LayerViscosity()
 
