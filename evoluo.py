@@ -178,7 +178,7 @@ class Curses(Screen):
                     self.write((x,y)," ",curses.A_REVERSE)
 
                 layer.get_under(obj.pos,obj.radius,_wrt,obj) # вырисовываем круг
-                self.line(obj.pos[0],Vector(obj.radius+obj._attack_range*obj._attack,obj.pos[1],isPolar = True),2)
+                self.line(obj.pos[0],Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,obj.pos[1],isPolar = True),2)
                 self.line(obj.pos[0],obj.speed[0] * 3,1)
                 self.write((int(obj.pos[0].x),int(obj.pos[0].y)),"%d" %(obj._get_lifestate()*10),curses.A_REVERSE)
 
@@ -232,8 +232,7 @@ class Layer:
             self.layer = [[int(x>y)*(max-min)+min for x in range(w)] for y in range(h)]
 
     def get_under(self,pos,R,func,*args): #checked 
-        """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R.
-        На будущее: есть возможность оптимизации, вида вынести все эти расчёты во вне, например массивами размера RxR, где показывается, брать или не брать эту клетку. Переделать в иттератор!"""
+        """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
         _R = int(round(R))
         dx = int(pos[0].x)
         dy = int(pos[0].y)
@@ -274,15 +273,30 @@ class LayerObjects(Layer):
         self._objs = {}
         self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
 
+    def _generate_id(self):
+        """ Генерирует уникальный id. В будущем переделать """
+        return random.randint(0,10000000)
+
     def create_obj(self,obj):
         """ Создаёт объект """
-        self._objs.update({random.randint(0,10000000):obj})
+        obj._id = self._generate_id()
+        self._objs.update({obj._id:obj})
 
     def get_objs(self):
+        """ Возвращает список объектов """
         return list(self._objs.values())
 
     def get_obj_by_id(self,id):
+        """ Возвраащет объект по id """
         return self._objs.get(id,None)
+
+    def delete_obj_by_id(self,id):
+        """ Удаляет объект по id """
+        try:
+            self._objs.pop(id)
+        except KeyError:
+            return 1
+        return 0
 
     def _impact_layer(self,layer):
         """ Для каждого объекта внутри себя заставляет его обработать слой """
@@ -351,24 +365,31 @@ class LayerObjects(Layer):
     def _attack(self,a,b):
         #Расчёт того, насколько глубоко проник удар I.3
         OO = Vector(b.pos[0].x-a.pos[0].x, b.pos[0].y-a.pos[0].y, isPolar = False) # Вектор, соединяющий центры ботов
-        at = Vector(a.radius + a._attack * a._attack_range * a.get_strong(), a.pos[1], isPolar = True) #вектор атаки
-        phi = OO.phi - at.phi # угол
-        ah = Vector(math.cos(phi)*OO.r, at.phi, isPolar = True) # вектор до высоты, опущенной из центра b
-        f_at = at.r-ah.r # первая часть проникновения
-        OH = (OO - ah).r # длинна высота из центра b
-        if OH < b.radius:
-            BH = math.sqrt(b.radius*b.radius - OH*OH)
-            f_at += BH
-            if f_at > 0:
-                # pdb.set_trace()
-                f_at *= a._attack * a.get_strong() #вычисляем силу атаки
-                if BH > 0.001: # вычисляем угловое ускорение
-                    omega = f_at * math.sin(math.atan(OH/BH)) # учитываем энергию a и силу удара
-                else:
-                    omega = 0
-                b.energy (- f_at)
-                b._add_accel((OO.one() * f_at, omega)) #отталкиваем и крутим противника
-
+        at = Vector(a.radius + a._attack * a._attack_range * a.get_strong() * a.radius, a.pos[1], isPolar = True) #вектор атаки
+        if - math.pi / 2 < at.phi - OO.phi < math.pi / 2:
+            ah = Vector(math.cos(at.phi - OO.phi)*OO.r, at.phi, isPolar = True) # вектор до высоты, опущенной из центра b
+            f_at = at.r-ah.r # первая часть проникновения
+            OH = (ah - OO).r # длинна высота из центра b
+            if OH < b.radius:
+                BH = math.sqrt(b.radius*b.radius - OH*OH)
+                f_at += BH
+                if f_at > 0:
+                    if b.status != 0:
+                        # pdb.set_trace()
+                        f_at *= a._attack * a.get_strong() / a.radius #вычисляем силу атаки
+                        if BH > 0.001: # вычисляем угловое ускорение
+                            omega = f_at * math.sin(math.atan(OH/BH)) # учитываем энергию a и силу удара
+                        else:
+                            omega = 0
+                        b.energy (- f_at)
+                        b._add_accel((OO.one() * f_at, omega)) #отталкиваем и крутим противника
+                    else:
+                        b.mass -= 1 * dt # За один тик убавляется 1 жизнь
+                        if b._change_state() == -1:
+                            self.delete_obj_by_id(b._id) # удаляем из списка ВОЗМОЖНОЕ МЕСТО ДЛЯ УТЕЧКИ ПАМЯТИ
+                        else: # если он есть, то поедаем его:
+                            b.radius = math.sqrt(b.mass)
+                        a.energy(b._max_energy * b._strong / 10) #FACTOR добвляем энергии поедающему
 
     def attack(self):
         _objs = self.get_objs()
@@ -412,9 +433,9 @@ class Mind:
         pass
 
     def step(self,args):
-        move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),0)
-        #move = (0,0)
-        attack = 0.1 # -- сила удара
+        move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),random.random()-0.5)
+        #move = (1,0)
+        attack = random.random() # -- сила удара
         ferromons = (1,0,0,0) # 2^4 = 16 ферромонов, в данный момент он отдаёт ферромон 1000
         return {"move":move, "attack":attack, "ferromons": ferromons}
 
@@ -432,6 +453,7 @@ class Object:
             ,radius:'радиус объекта' = 1
             ,strong:'Защита и сила; от неё зависят многие параметры' = 1
             ,attack_range: 'Дальность атаки' = 1
+            ,id : 'Идентификатор объекта' = 0
             ,**args):
         self.pos = [Vector(*pos[0:2]), pos[2]] #положение -- координата + угол
         self._energy = energy # Текущая энергия
@@ -445,6 +467,7 @@ class Object:
         self._mind = mind(initmnd) # Мозги
         self._attack = 0 #сила атаки
         self._attack_range = attack_range #дальность атаки
+        self._id = id
 
     def _move(self): 
         """ Передвигает объект на вектор """
@@ -502,11 +525,16 @@ class Object:
 
     def _change_state(self):
         """ Изменяет статус в зависимости от параметров """
-        self.status = 2
-        if self._energy < self._max_energy * 0.05: #FACTOR
+        self.status = 3 # Готов поделиться
+        if self._energy < 0.05: #FACTOR
             self.status = 0
-        elif self._energy < self._max_energy * 0.1 : #FACTOR
+        elif self._energy < 0.1 : #FACTOR
             self.status = 1
+        elif self._energy < self._max_energy: 
+            self.status = 2
+        if self.mass <= 1.1: #FACTOR
+            self.status = -1
+        return self.status
 
     def _impact_self(self):
         """ Шагает"""
@@ -518,7 +546,7 @@ class Object:
             self._impact_self()
 
     def step(self,layer):
-        self._impact_layer(layer)
+        self._impact_layer(layer)        
 
     def __str__(self):
         return "Pos: (%3d,%3d;%3.f); Pow: %.2f/%.2f; Sp: [w:%2.4f; a:%3.f om:%3.f] M:%3d [A:%1.4f Str: %1.4f] St: %d" %(self.pos[0].x,self.pos[0].y,(self.pos[1]/math.pi*180),self._energy,self._max_energy,self.speed[0].r,(self.speed[0].phi/math.pi*180),(self.speed[1]/math.pi*180),self.mass,self._attack * self._attack_range * self.get_strong(),self._strong,self.status)
@@ -542,7 +570,7 @@ class ObjectBot(Object):
         self.add_accel(accel) # применяет ускорение
         self.energy(- (abs(accel[0]) + abs(accel[1])) / area) #вычитает энергию в зависимости от площади
         self._attack = ret.get("attack",0) # забирает силу атаки
-        self.energy(- self._attack * self._attack_range * self.get_strong() / 10) #забирает энергию на работу атаки FACTOR: При силе удара 1 и длинне 1 при жизни 1 он способен бить 10 тиков не переставая 
+        self.energy(- self._attack * self._attack_range * self.get_strong() / 100) # FACTOR забирает энергию на работу атаки FACTOR: При силе удара 1 и длинне 1(R) при жизни 1 он способен бить 100 тиков не переставая 
         # применение
         self.apply_accel()
         self._move()
@@ -653,7 +681,12 @@ if __name__ == '__main__':
     elif args.test == '14':
         layer_obj.create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
         layer_obj.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
-
+    elif args.test == '15':
+        layer_obj.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer_obj.create_obj(ObjectBot( pos = (30,38,math.pi),radius = 5,speed = (-1,0,0), strong = 1, energy = 0.9))
+    elif args.test == '16':
+        layer_obj.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 0.5,maxenergy = 1))
+        layer_obj.create_obj(ObjectBot( pos = (30,38,0),radius = 5,speed = (-1,0,0), strong = 1, energy = 0.9))
     layer_viscosity = LayerViscosity()
 
     layers = [layer_viscosity,layer_obj] # layer_obj должен быть всегда в конце, что бы объекты двигались, когда они уже 
