@@ -17,6 +17,9 @@ def getpair(a,b): #костыль для быстродействия
     else:
         return [a,b]
 
+def gamecoord_to_screen(x):
+    return x * k_screen
+
 def get_min_distance(param,p1,p2): #проверена
     """ Возвращает минимальное расстояние между двумя точками на поле """
     _p1 = [p1.x, p1.y]
@@ -58,23 +61,9 @@ def write_arr(arr):
             print("%.2f" %el,end=', ')
         print(']')
 
-def _init_get_under():
-    """ Раньше эта функция жила в Layer, но так как она жутко ресурсозатратная, было решено вынести её в отдельное место и просчитать с самого начала, ибо уменьшение производительности в 30 раз меня огорчило.
-    !!! заполнять вписанный квадрат в окружность, а всё оставшееся считать, проверить на скорость"""
-    global width,height,screen
-    maxR = round(min(width/2,height/2))
-    _get_under = [[] for r in range(maxR)]
-
-    for R in range(1,maxR+1):
-        for y in range(-R,+R+1):
-            for x in range(-R,+R+1):
-                if get_min_distance((width,height),(x,y),(0,0)) <= R:
-                    _get_under[R-1].append([x,y])
-    return _get_under
-
 def _init_get_under_new():
-    global width,height,screen
-    maxR = round(min(width/2,height/2))
+    global real_width,real_height,screen
+    maxR = round(min(real_width/2,real_height/2))
     _get_under = [[] for r in range(maxR)]
     v_0 = Vector(0,0)
     for R in range(1,maxR+1):
@@ -82,7 +71,7 @@ def _init_get_under_new():
         for x in range(1,R+1):
             for y in range(1,R+1):
                 if (x + y >= R):
-                    if get_min_distance((width,height),Vector(x,y),v_0) <= R:
+                    if get_min_distance((real_width,real_height),Vector(x,y),v_0) <= R:
                         _quart.append([x,y])
                 else:
                     _quart.append([x,y])
@@ -118,6 +107,8 @@ class Screen:
         pass
     def write(self,pos,str):
         pass
+    def write_inf(self,str):
+        pass
     def stop(self):
         """ Останавливает экран """
         pass
@@ -131,7 +122,7 @@ import curses
 
 class Curses(Screen):
     def __init__(self):
-        global width, height
+        global real_width, real_height
         self.type = "Curses Screen"
         self._scr = curses.initscr()
         curses.start_color()
@@ -142,7 +133,8 @@ class Curses(Screen):
         self._scr.keypad(1)
         self._scr.clear()
         self._scr.nodelay(1)
-        height,width = self._scr.getmaxyx()
+        real_height,real_width = self._scr.getmaxyx()
+        self.wrt_pos = 0
 
     def line(self,pos,vect,color):
         def _from(a,b):
@@ -153,8 +145,8 @@ class Curses(Screen):
         x = [0,0]
         y = [0,0]
 
-        x[0], y[0] = pos.x, pos.y
-        x[1], y[1] = vect.x + pos.x, vect.y + pos.y
+        x[0], y[0] = pos[0], pos[1]
+        x[1], y[1] = vect.x + x[0], vect.y + y[0]
 
         if abs(y[1] - y[0]) < abs(x[1] - x[0]):
             for _x in _from(0,int(x[1]-x[0])):
@@ -169,33 +161,52 @@ class Curses(Screen):
                         ( int( x[0] + (x[1]-x[0]) / (y[1]-y[0]) * _y ), int(y[0] + _y) ), '*', curses.color_pair(color)
                         )
         pass
-        
+
+    def get_under(self,pos,R,func,*args): # ДУБЛИРУЕМ ФУНКЦИОНАЛЬНОСТЬ
+        """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
+        _R = int(round(R))
+        dx = int(pos[0])
+        dy = int(pos[1])
+        for x,y in _get_under[_R-1]:
+            x += dx
+            x %= real_width
+            y += dy
+            y %= real_height
+            func(x,y,*args)
+
     def draw(self,layer):
         if layer.__class__ == LayerObjects:
             for obj in layer.get_objs():
-
-                def _wrt(x,y,obj):
+                pos = obj.get_pos_screen()
+                def _wrt(x,y):
                     self.write((x,y)," ",curses.A_REVERSE)
-
-                layer.get_under(obj.pos,obj.radius,_wrt,obj) # вырисовываем круг
-                self.line(obj.pos[0],Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,obj.pos[1],isPolar = True),2)
-                self.line(obj.pos[0],obj.speed[0] * 3,1)
-                self.write((int(obj.pos[0].x),int(obj.pos[0].y)),"%d" %(obj._get_lifestate()*10),curses.A_REVERSE)
-
-                # сделать вывод скорости и ускорения
-        elif layer.__class__ == LayerViscosity:
-            pass
+                self.get_under(pos,obj.radius * k_screen,_wrt) # рисуем круг
+                self.line(
+                    pos,
+                    gamecoord_to_screen(
+                        Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
+                        obj.pos[1],
+                        isPolar = True
+                        )),
+                    2)
+                self.line(pos,obj.speed[0] * k_screen * 3,1)
+                self.write((int(pos[0]),int(pos[1])),"%d" %(obj._get_lifestate()*10),curses.A_REVERSE)
 
     def update(self):
         self._scr.refresh()
 
     def clear(self):
-        for y in range(height):
-                self.write((0,y),' ' * width)
+        for y in range(real_height):
+                self.write((0,y),' ' * real_width)
+        self.wrt_pos = 0
         #self._scr.clear()
 
     def write(self,pos,str,*attr):
-        self._scr.addstr(pos[1] % height,pos[0] % width,str,*attr)
+        self._scr.addstr(int(pos[1] % real_height),int(pos[0] % real_width),str,*attr)
+
+    def write_inf(self,str,*attr):
+        self._scr.addstr(self.wrt_pos % real_height,1,str,*attr)
+        self.wrt_pos += 1
 
     def write_ch(self,pos,ch,*attr):
         self._scr.addch(pos[1],pos[0],ch,*attr)
@@ -234,8 +245,8 @@ class Layer:
     def get_under(self,pos,R,func,*args): #checked 
         """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
         _R = int(round(R))
-        dx = int(pos[0].x)
-        dy = int(pos[0].y)
+        dx = int(pos[0])
+        dy = int(pos[1])
         for x,y in _get_under[_R-1]:
             x += dx
             x %= self.width
@@ -287,7 +298,7 @@ class LayerObjects(Layer):
         return list(self._objs.values())
 
     def get_obj_by_id(self,id):
-        """ Возвраащет объект по id """
+        """ Возвращает объект по id """
         return self._objs.get(id,None)
 
     def delete_obj_by_id(self,id):
@@ -301,53 +312,76 @@ class LayerObjects(Layer):
     def _impact_layer(self,layer):
         """ Для каждого объекта внутри себя заставляет его обработать слой """
         for obj in self.get_objs():
+            if obj.status == 3:
+                self.create_obj(obj.create_child())
+                obj._energy *= 0.6 # должно отняться ровно 40% за раз FACTOR
+                obj._change_state()
+            if obj.status == -1:
+                self.delete_obj_by_id(obj._id) # удаляем из списка ВОЗМОЖНОЕ МЕСТО ДЛЯ УТЕЧКИ ПАМЯТИ
             obj.step(layer)
 
-    def _collision(self,i,k,inside):
+    def _eat(self,obj1,obj2):
+        """ Поедание """
+        if obj2.status <= 0:
+            screen.write_inf("Eat: %d --> %d" %(obj2._id,obj1._id))
+            obj2.mass -= 1 * dt # За один тик убавляется 1 жизнь
+            if obj2._change_state() != -1:
+                obj2.radius = math.sqrt(obj2.mass)
+            obj1.energy(obj2._max_energy * obj2._strong) #FACTOR добвляем энергии поедающему
+
+    def _collision(self,id1,id2,inside):
         """ Просчитывает скорости объектов
         РАсчёт коэффициента: 1.1"""
-        _objs = self.get_objs()
-        p1 = _objs[i].pos[0]
-        v1 = _objs[i].speed[0]
-        w1 = _objs[i].speed[1]
-        m1 = _objs[i].mass
-        p2 = _objs[k].pos[0]
-        v2 = _objs[k].speed[0]
-        w2 = _objs[k].speed[1]
-        m2 = _objs[k].mass
-        #получаем вектор-прямую, на которую будут откладываться взаимодействующие вектора
-        phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
+        obj1 = self.get_obj_by_id(id1)
+        obj2 = self.get_obj_by_id(id2)
+        if (obj1 != None) and (obj2 != None):
+            p1 = obj1.pos[0]
+            v1 = obj1.speed[0]
+            w1 = obj1.speed[1]
+            m1 = obj1.mass
+            p2 = obj2.pos[0]
+            v2 = obj2.speed[0]
+            w2 = obj2.speed[1]
+            m2 = obj2.mass
+            #получаем вектор-прямую, на которую будут откладываться взаимодействующие вектора
+            phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
 
-        # Меняем скорости, если они столкнулись только что
-        if self._colliding[0].count(getpair(i,k)) == 0:
-            def _get(m1,m2,v1,v2):
-                """ уравнение полученных скоростей, чтобы по 10 раз не писать одно и то же """ 
-                return (v1 * (m1 - m2) + v2 * 2 * m2) / (m1 + m2)
-            v1.phi -= phi # поворот так, что линия есть OX 
-            v2.phi -= phi
-            _v1 = v1.copy()
-            _v2 = v2.copy()
-            V1before = _v1.x
-            V2before = _v2.x
-            V1after = _v1.x = _get(m1,m2,v1.x,v2.x) # взаимодействуют
-            V2after = _v2.x = _get(m2,m1,v2.x,v1.x)
-            _v1.phi += phi #поворачиваем обратно
-            _v2.phi += phi
-            _objs[i].speed[0] = _v1
-            _objs[k].speed[0] = _v2
+            # Меняем скорости, если они столкнулись только что
+            if self._colliding[0].count(getpair(id1,id2)) == 0:
+                def _get(m1,m2,v1,v2):
+                    """ уравнение полученных скоростей, чтобы по 10 раз не писать одно и то же """ 
+                    return (v1 * (m1 - m2) + v2 * 2 * m2) / (m1 + m2)
+                v1.phi -= phi # поворот так, что линия есть OX 
+                v2.phi -= phi
+                _v1 = v1.copy()
+                _v2 = v2.copy()
+                V1before = _v1.copy()
+                V2before = _v2.copy()
+                _v1.x = _get(m1,m2,v1.x,v2.x) # взаимодействуют
+                _v2.x = _get(m2,m1,v2.x,v1.x)
+                dv1 = abs((_v1 - V1before).x)
+                dv2 = abs((_v2 - V2before).x)
+                _v1.phi += phi #поворачиваем обратно
+                _v2.phi += phi
+                obj1.speed[0] = _v1
+                obj2.speed[0] = _v2
 
-            mass12 = _objs[k].mass / _objs[i].mass
-            _objs[i].speed[1] -= (w2 * mass12 + w1) / 10 # сохраняем импульс и передаём 1/10 от угловой скорости FACTOR
-            _objs[k].speed[1] -= (w1 / mass12 + w2) / 10
+                mass12 = obj2.mass / obj1.mass
+                obj1.speed[1] -= (w2 * mass12 + w1) / 10 # сохраняем импульс и передаём 1/10 от угловой скорости FACTOR
+                obj2.speed[1] -= (w1 / mass12 + w2) / 10
 
-            if (V1after-V1before)/m1>_objs[i].get_strong():
-                _objs[i].energy(-((V1after-V1before)-_objs[i].get_strong()/m1))
-            if (V2after-V2before)/m2>_objs[k].get_strong():
-                _objs[k].energy(-((V2after-V2before)-_objs[k].get_strong()/m2))
-        else:
-            F = Vector(inside,phi,isPolar = True)
-            _objs[i]._add_accel([-F,0]) #добавляем ускорение
-            _objs[k]._add_accel([F,0])
+                if dv1>obj1.get_strong():
+                    obj1.energy(-(dv1-obj1.get_strong()))
+                if dv2/m2>obj2.get_strong():
+                    obj2.energy(-(dv2-obj2.get_strong()))
+            else:
+                F = Vector(inside,phi,isPolar = True)
+                obj1._add_accel([-F,0]) #добавляем ускорение
+                obj2._add_accel([F,0])
+
+            # Съедает
+            for a,b in [(obj1,obj2),(obj2,obj1)]:
+                self._eat(a,b)
 
     def collision(self):
         """ Определяет, сталкиваются ли объекты """
@@ -357,8 +391,8 @@ class LayerObjects(Layer):
             for j in range(i+1,lenght):
                 inside = (get_min_distance((self.width,self.height),_objs[i].pos[0],_objs[j].pos[0]) - (_objs[i].radius+_objs[j].radius)) / 2
                 if inside < 0:
-                    self._collision(i,j,-inside)
-                    self._colliding[1].append(getpair(i,j)) # добавляет сталкивающиеся объекты в новый, чтобы на следующем шаге показать, что они уже сталкивались и надо их посильнее оттолкнуть
+                    self._collision(_objs[i]._id,_objs[j]._id,-inside)
+                    self._colliding[1].append(getpair(_objs[i]._id,_objs[j]._id)) # добавляет сталкивающиеся объекты в новый, чтобы на следующем шаге показать, что они уже сталкивались и надо их посильнее оттолкнуть
         self._colliding[0] = copy.copy(self._colliding[1])
         self._colliding[1] = []
 
@@ -374,8 +408,8 @@ class LayerObjects(Layer):
                 BH = math.sqrt(b.radius*b.radius - OH*OH)
                 f_at += BH
                 if f_at > 0:
+                    screen.write_inf("Attack: %d --> %d, by Str %.3f" %(a._id,b._id,f_at))
                     if b.status != 0:
-                        # pdb.set_trace()
                         f_at *= a._attack * a.get_strong() / a.radius #вычисляем силу атаки
                         if BH > 0.001: # вычисляем угловое ускорение
                             omega = f_at * math.sin(math.atan(OH/BH)) # учитываем энергию a и силу удара
@@ -383,13 +417,6 @@ class LayerObjects(Layer):
                             omega = 0
                         b.energy (- f_at)
                         b._add_accel((OO.one() * f_at, omega)) #отталкиваем и крутим противника
-                    else:
-                        b.mass -= 1 * dt # За один тик убавляется 1 жизнь
-                        if b._change_state() == -1:
-                            self.delete_obj_by_id(b._id) # удаляем из списка ВОЗМОЖНОЕ МЕСТО ДЛЯ УТЕЧКИ ПАМЯТИ
-                        else: # если он есть, то поедаем его:
-                            b.radius = math.sqrt(b.mass)
-                        a.energy(b._max_energy * b._strong / 10) #FACTOR добвляем энергии поедающему
 
     def attack(self):
         _objs = self.get_objs()
@@ -408,7 +435,6 @@ class LayerObjects(Layer):
         self.collision()
         self.attack()
 
-
 class LayerViscosity(Layer):
     """ Замедляет объекты. Работает по принципу больше скорость -- больше сила трения
     #FIXME: не замедляет (общий импульс системы и скорость не уменьшаются, если dt > 0.3 """
@@ -426,26 +452,27 @@ class LayerViscosity(Layer):
             for obj in layer.get_objs():
                 self._impact_obj(obj)
 
-
 class Mind:
     """ (Тестовый) Суперкласс разума. На вход подаются данные с датчиков, на выход -- действия """
     def __init__(self,init):
         pass
 
+    def create_child(self):
+        return copy.deepcopy(self)
+
     def step(self,args):
         move = (math.sin(args.get("energy",0) / args.get("maxenergy",1)),random.random()-0.5)
-        #move = (1,0)
+        # move = (1,0)
         attack = random.random() # -- сила удара
+        # attack = 1
         ferromons = (1,0,0,0) # 2^4 = 16 ферромонов, в данный момент он отдаёт ферромон 1000
         return {"move":move, "attack":attack, "ferromons": ferromons}
-
 
 class Object: 
     """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив"""
     def __init__(self
             ,pos:'местоположение' = (0,0,0) # x,y; угол
-            ,mind:'Мозги' = Mind
-            ,initmnd:'Данные для инициализации мозгов' = ()
+            ,mind:'Мозги' = Mind(None)
             ,energy:'Энергия' = 0.1
             ,maxenergy:'Максимальная энергия' = 1
             ,speed:'Скорость' = (0,0,0) # мощь, угол; угловая скорость
@@ -464,7 +491,7 @@ class Object:
         self.mass = radius ** 2 # масса
         self.status = 2 # статус
         self._strong = strong #Защита и сила
-        self._mind = mind(initmnd) # Мозги
+        self._mind = mind # Мозги
         self._attack = 0 #сила атаки
         self._attack_range = attack_range #дальность атаки
         self._id = id
@@ -474,7 +501,7 @@ class Object:
         self.pos[1] += self.speed[1] * dt # угловая скорость
         self.pos[1] %= 2*math.pi
 
-        self.pos[0] += self.speed[0] * dt #поступательная скорость
+        self.pos[0] += self.speed[0] * dt#поступательная скорость
         self.pos[0].x %= width
         self.pos[0].y %= height
 
@@ -493,7 +520,7 @@ class Object:
         global dt, width, height
         accel, omega = self._accel
 
-        k = dt / self.mass
+        k = dt / self.mass 
 
         self.speed[1] += omega * k / math.pi / 10 #применяем угловое ускорение FACTOR
 
@@ -508,20 +535,24 @@ class Object:
 
     def energy(self,de): # зависит от времени
         """ Управление энергией """
-        self._energy += de * dt
+        if self.get_strong() > 0.0001:
+            if de > 0:
+                self._energy += de * dt / self.mass
+            else:
+                self._energy += de * dt / self.get_strong() / self.mass
+        else:
+            self._energy = 0
         if (de < 0) and (self.status > 1):
             self._strong += -de*dt / 100 # FACTOR
-        return_energy = 0
-        if self._energy > self._max_energy:
-            return_energy = self._energy - self._max_energy 
-            self._energy = self._max_energy
         elif self._energy < 0:
-            return_energy = -self._energy
             self._energy = 0
-        return return_energy
+        self._change_state()
 
     def get_pos(self):
         return self.pos[0].x,self.pos[0].y
+
+    def get_pos_screen(self):
+        return self.pos[0].x * k_screen, self.pos[0].y * k_screen
 
     def _change_state(self):
         """ Изменяет статус в зависимости от параметров """
@@ -532,25 +563,27 @@ class Object:
             self.status = 1
         elif self._energy < self._max_energy: 
             self.status = 2
-        if self.mass <= 1.1: #FACTOR
+        if self.mass <= 0.1: #FACTOR
             self.status = -1
         return self.status
 
     def _impact_self(self):
         """ Шагает"""
         self._move()
-        self._change_state()
 
     def _impact_layer(self,layer):
         if layer.__class__ == LayerObjects:
             self._impact_self()
+
+    def create_child(self):
+        """ Возвращает ребёнка """
+        pass
 
     def step(self,layer):
         self._impact_layer(layer)        
 
     def __str__(self):
         return "Pos: (%3d,%3d;%3.f); Pow: %.2f/%.2f; Sp: [w:%2.4f; a:%3.f om:%3.f] M:%3d [A:%1.4f Str: %1.4f] St: %d" %(self.pos[0].x,self.pos[0].y,(self.pos[1]/math.pi*180),self._energy,self._max_energy,self.speed[0].r,(self.speed[0].phi/math.pi*180),(self.speed[1]/math.pi*180),self.mass,self._attack * self._attack_range * self.get_strong(),self._strong,self.status)
-
 
 class ObjectBot(Object):
     def add_accel(self,usk):
@@ -566,31 +599,57 @@ class ObjectBot(Object):
         else:
             ret = {}
         #Обработка результатов мозга
-        accel = [x * self.get_strong() for x in ret.get("move",(0,0))]
+        accel = [x for x in ret.get("move",(0,0))]
+        self.energy(- (abs(accel[0]) + abs(accel[1])) / 60) #вычитает энергию за передвижение. При k=1 и k_screen = 1, m=5, m_e = 1, e = 1 пройдёт 100 клеток
+        accel = [x  * self.get_strong() for x in accel]
         self.add_accel(accel) # применяет ускорение
-        self.energy(- (abs(accel[0]) + abs(accel[1])) / area) #вычитает энергию в зависимости от площади
+
         self._attack = ret.get("attack",0) # забирает силу атаки
-        self.energy(- self._attack * self._attack_range * self.get_strong() / 100) # FACTOR забирает энергию на работу атаки FACTOR: При силе удара 1 и длинне 1(R) при жизни 1 он способен бить 100 тиков не переставая 
+        self.energy(- self._attack / 60) # FACTOR забирает энергию на работу атаки FACTOR: При силе удара 1 и длинне 1(R) при жизни 1 он способен бить 490*k тиков не переставая 
         # применение
         self.apply_accel()
         self._move()
-        self._change_state()
+
+        if self.status == 1:
+            self.energy(-0.5)
+
+        if (self.status == 0) or (self.status == -1):
+            self.mass -= dt / 10  # за один тик 1/5 е.м.
+            if self._change_state() != -1:
+                self.radius = math.sqrt(self.mass)
 
         #self._attack = 0 # обнуляем
 
     def _impact_layer(self,layer):
         """ Воздействует на слои """
-        if layer.__class__ == LayerViscosity:
-            pass # никак
-        #---------------#
-        elif layer.__class__ == LayerObjects:
+        if layer.__class__ == LayerObjects:
             self._impact_self()
         #---------------#
+
+    def create_child(self):
+        """ Возвращает ребёнка """
+        # Вычисляем позицию
+        phi = 2 * math.pi * random.random()
+        pos = self.get_pos()
+        pos = (2 * self.radius * math.cos(phi) + pos[0], 2 * self.radius * math.sin(phi) + pos[1],0)
+        speed = (math.cos(phi), math.sin(phi), 0)
+        return ObjectBot(
+            pos = pos
+            ,mind = self._mind.create_child()
+            ,initmnd = ()
+            ,energy = self._energy * 0.4
+            ,maxenergy = self._max_energy * (1 + k_mutation * (random.random() - 0.5) ) #FACTOR
+            ,speed = speed # мощь, угол; угловая скорость
+            ,accelerate = (0,0) # мощь, угловое ускорение
+            ,radius = self.radius * (1 + k_mutation * (random.random() - 0.5) ) #FACTOR
+            ,strong = self._strong * (1 + k_mutation * (random.random() - 0.5) ) #FACTOR
+            ,attack_range = self._attack_range * (1 + k_mutation * (random.random() - 0.5) ) #FACTOR
+            ,id = 0
+            )
 
     def step(self,layer):
         """ Вызывает _impact_layer """
         self._impact_layer(layer)
-
 
 def step(layers):
     for layer in layers:
@@ -605,6 +664,8 @@ def info():
 
 width = 100
 height = 100
+real_width = 200
+real_height = 200
 
 if __name__ == '__main__':
 
@@ -620,7 +681,6 @@ if __name__ == '__main__':
     else:
         dt = float(args.deltat) # сек^-1
 
-
     flags = {"drawinfo":1,"run":1}
 
     if args.screen == 'curses':
@@ -630,7 +690,14 @@ if __name__ == '__main__':
     else:
         screen = Screen()
 
-    height -= 1
+    if real_width > real_height:
+        height = width / real_width * real_height
+    else:
+        width = height / real_height * real_width
+
+    k_screen = real_width / width
+
+    real_height -= 1
 
     area = width * height
     _get_under = _init_get_under_new()
@@ -638,8 +705,9 @@ if __name__ == '__main__':
     layer_obj = LayerObjects()
 
     if args.test == None:
-        for i in range(random.randint(1,50)):
-            layer_obj.create_obj(ObjectBot(pos = (random.randint(0,width-1),random.randint(0,height-1),random.random()),energy = random.random(),maxenergy = random.random(),radius = random.random()*7+1))
+        for i in range(random.randint(1,100)):
+            maxenergy = random.random() + 0.5
+            layer_obj.create_obj(ObjectBot(pos = (random.random()*width,random.random()*height,random.random()*2*math.pi),energy = random.random() * maxenergy,maxenergy = maxenergy,radius = random.random()*1+2))
     elif args.test == '1':
         layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
         layer_obj.create_obj(ObjectBot( pos = (40,40,0),radius = 5,speed = (-1,0,-1), energy = 0.9 ))
@@ -682,13 +750,17 @@ if __name__ == '__main__':
         layer_obj.create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
         layer_obj.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
     elif args.test == '15':
-        layer_obj.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
-        layer_obj.create_obj(ObjectBot( pos = (30,38,math.pi),radius = 5,speed = (-1,0,0), strong = 1, energy = 0.9))
+        layer_obj.create_obj(ObjectBot( pos = (25,38,0),radius = 2,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer_obj.create_obj(ObjectBot( pos = (30,38,math.pi),radius = 2.1,speed = (-1,0,0), strong = 1, energy = 0.9))
     elif args.test == '16':
-        layer_obj.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 0.5,maxenergy = 1))
-        layer_obj.create_obj(ObjectBot( pos = (30,38,0),radius = 5,speed = (-1,0,0), strong = 1, energy = 0.9))
-    layer_viscosity = LayerViscosity()
+        layer_obj.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer_obj.create_obj(ObjectBot( pos = (30,38,0),radius = 2,speed = (-1,0,0), strong = 1, energy = 0.9))
+    elif args.test == '17':
+        layer_obj.create_obj(ObjectBot( pos = (0,38,0),radius = 2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
+    elif args.test == '18':
+        layer_obj.create_obj(ObjectBot( pos = (10,50,math.pi/2),radius = 1,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
 
+    layer_viscosity = LayerViscosity()
     layers = [layer_viscosity,layer_obj] # layer_obj должен быть всегда в конце, что бы объекты двигались, когда они уже 
     ch = 0 
     tick = 0
@@ -696,6 +768,8 @@ if __name__ == '__main__':
     last_fps = fps = 0
     last_tick = 0
     h0 = height - len(layer_obj._objs) - 2
+    k_mutation = 0.05
+
     while ch != 27:
         if ch == 105: # i
             flags["drawinfo"] += 1
@@ -705,20 +779,16 @@ if __name__ == '__main__':
             flags["run"] %= 2
             screen._scr.nodelay(flags['run'])
 
-        screen.clear()
-        if flags["drawinfo"]:
-            h = h0
-            sum = 0
-            for obj in layer_obj.get_objs():
-                screen.write((0,h),str(obj)+' ')
-                h += 1
-                sum += obj.speed[0].r*obj.mass
-            screen.write((0,h),'Общий импульс системы:'+str(sum))
-            screen.write((0,h+1),'tick: %d; Gtime: %.2f; half fps: %.2f; last fps: %.2f' % (tick,tick*dt,fps,last_fps))
-
-        screen.draw(layer_obj)
-
         if flags['run']:
+            screen.clear()
+            if flags["drawinfo"]:
+                sum = 0
+                for obj in layer_obj.get_objs():
+                    screen.write_inf(str(obj)+' ')
+                    sum += obj.speed[0].r*obj.mass
+                screen.write_inf('Общий импульс системы:'+str(sum))
+                screen.write_inf('tick: %d; Gtime: %.2f; half fps: %.2f; last fps: %.2f' % (tick,tick*dt,fps,last_fps))
+            
             step(layers) # Самое главное
             tick += 1
             t2 = time_.time()
@@ -730,11 +800,12 @@ if __name__ == '__main__':
             if t2 != t1:
                 fps = tick / (t2-t1)
 
+            screen.draw(layer_obj)
             screen.update()
 
-        if args.screen != 'curses':
-            if tick > 2000:
-                 break
+        # if args.screen != 'curses':
+            # if tick > 2000:
+                 # break
         ch = screen.getch()
         #screen.scr.addstr(22,0,str(c))
     del screen
