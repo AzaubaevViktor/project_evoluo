@@ -309,7 +309,7 @@ class LayerObjects(Layer):
             return 1
         return 0
 
-    def _impact_layer(self,layer):
+    def _impact_self(self,layer):
         """ Для каждого объекта внутри себя заставляет его обработать слой """
         for obj in self.get_objs():
             if obj.status == 3:
@@ -431,7 +431,7 @@ class LayerObjects(Layer):
 
     def step(self,layers):
         for layer in layers:
-            self._impact_layer(layer)
+            self._impact_self(layer)
         self.collision()
         self.attack()
 
@@ -467,6 +467,26 @@ class Mind:
         # attack = 1
         ferromons = (1,0,0,0) # 2^4 = 16 ферромонов, в данный момент он отдаёт ферромон 1000
         return {"move":move, "attack":attack, "ferromons": ferromons}
+
+class Sensor:
+    """ Суперкласс сенсора. На вход -- слои, которые он обрабатывает и выдаёт информацию """
+    def __init__(self,layer):
+        self.output = None # здесь должен быть ответ
+
+    def __call__(self,layers):
+        pass
+
+class Eyes(Sensor):
+    def __call__(self,layers):
+        list(map(_impact,layers))
+
+    def _impact(self,layer):
+        if layer.__class__ == LayerObjects:
+            self._impact_LayerObjects(layer)
+
+    def _impact_LayerObjects(self,layer):
+        pass
+
 
 class Object: 
     """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив"""
