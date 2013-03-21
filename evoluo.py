@@ -68,7 +68,7 @@ def write_inf(str_):
     Informations.append(str_)
 
 def _init_get_under_new():
-    global real_width,real_height,screen
+    global real_width,real_height
     maxR = round(min(real_width/2,real_height/2))
     _get_under = [[] for r in range(maxR)]
     v_0 = Vector(0,0)
@@ -88,15 +88,17 @@ def _init_get_under_new():
                         + [[-x,-y] for x,y in _quart]
                         + [[x,0] for x in range(-R,R+1)]
                         + [[0,y] for y in range(-R,R+1) if y != 0])
-        screen.update()
     return _get_under
 
 class Screen:
     """ Суперкласс экрана. Служит основой для других классов """
-    def __init__(self):
+    def __init__(self,type_screen,loop_func,layers):
         """ Инициализирует экран """
-        self.type = "Default Screen"
-        self._scr = None
+        self.type = type_screen
+        self.width = 0
+        self.height = 0
+        self.loop_func = loop_func
+        self.layers = layers
         pass
     def draw(self,layer):
         """ Расует слой """
@@ -119,6 +121,27 @@ class Screen:
         pass
     def getch(self):
         return 0
+    def _loop(self):
+        global tick
+        if (self.ch == b'q') or (self.ch == b'\xb1') or (self.ch == 27) or (self.ch == 113):
+            self.__del__()
+            del(self)
+            return 0
+        else:
+            self.clear()
+            self.loop_func(self.layers)
+            for layer in layers:
+                self.draw(layer)
+
+            self.update()
+
+            self.ch = self.getch()
+            tick += 1
+            return 1
+
+    def _end(self):
+        global tick
+        print("Ticks: %d" %tick)
     def __del__(self):
         """ Деструктор класса """
         pass
@@ -126,9 +149,14 @@ class Screen:
 import curses
 
 class ScreenCurses(Screen):
-    def __init__(self):
+    def __init__(self,loop_func,layers):
         global real_width, real_height
-        self.type = "Curses Screen"
+
+        Screen.__init__(self,"Curses Screen",loop_func,layers)
+
+        print("Init sprites...")
+        self._get_under = _init_get_under_new()
+
         self._scr = curses.initscr()
         curses.start_color()
         curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
@@ -139,7 +167,14 @@ class ScreenCurses(Screen):
         self._scr.clear()
         self._scr.nodelay(1)
         real_height,real_width = self._scr.getmaxyx()
+        real_height -= 1
+        self.width = real_width
+        self.height = real_height
         self.wrt_pos = 0
+        self.ch = None
+        while self._loop(): # запускаем главный цикл
+            pass
+        print("ned")
 
     def line(self,pos,vect,color):
         def _from(a,b):
@@ -167,12 +202,12 @@ class ScreenCurses(Screen):
                         )
         pass
 
-    def get_under(self,pos,R,func,*args): # ДУБЛИРУЕМ ФУНКЦИОНАЛЬНОСТЬ
+    def get_under(self,pos,R,func,*args): # Удалить
         """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
         _R = int(round(R))
         dx = int(pos[0])
         dy = int(pos[1])
-        for x,y in _get_under[_R-1]:
+        for x,y in self._get_under[_R-1]:
             x += dx
             x %= real_width
             y += dy
@@ -185,7 +220,7 @@ class ScreenCurses(Screen):
                 pos = obj.get_pos_screen()
                 def _wrt(x,y):
                     self.write((x,y)," ",curses.A_REVERSE)
-                self.get_under(pos,obj.radius * k_screen,_wrt) # рисуем круг
+                self.get_under(pos,obj.radius * k_screen,_wrt) # Исправить на Layer. ...
                 self.line(
                     pos,
                     gamecoord_to_screen(
@@ -204,7 +239,6 @@ class ScreenCurses(Screen):
         for y in range(real_height):
                 self.write((0,y),' ' * real_width)
         self.wrt_pos = 0
-        #self._scr.clear()
 
     def write(self,pos,str,*attr):
         self._scr.addstr(int(pos[1] % real_height),int(pos[0] % real_width),str,*attr)
@@ -227,32 +261,28 @@ class ScreenCurses(Screen):
         self._scr.nodelay(1)
 
 class ScreenOpenGL(Screen):
-    def __init__(self,loop_func,layers,screen):
-        screen = self
-        self.type = "OpenGL"
+    def __init__(self,loop_func,layers):
+        """ Инициализирует экран и запускает его, потом всю программу """
+        Screen.__init__(self,"OpenGL",loop_func,layers)
+
         self.window = 0
-        self.width = 0
-        self.height = 0
         self.quad = None
         self.ch = []
-        self.loop_func = loop_func
-        self.layers = layers
 
         print("Fuck")
         GLUT.glutInit(sys.argv)
         GLUT.glutInitDisplayMode(GLUT.GLUT_RGBA | GLUT.GLUT_DOUBLE | GLUT.GLUT_ALPHA | GLUT.GLUT_DEPTH)
         GLUT.glutInitWindowSize(640, 640)
         GLUT.glutInitWindowPosition(0, 0)
-        window = GLUT.glutCreateWindow(b"Project Evoluo alpha")
+        self.window = GLUT.glutCreateWindow(b"Project Evoluo alpha")
         GLUT.glutDisplayFunc(self._loop) # Функция, отвечающая за рисование
         GLUT.glutIdleFunc(self._loop) # При простое перерисовывать
-        GLUT.glutReshapeFunc(self._resizeGLScene) # изменяет размеры окна
+        GLUT.glutReshapeFunc(self._resize) # изменяет размеры окна
         GLUT.glutKeyboardFunc(self._keyPressed) # Обрабатывает нажатия
         self._initGL(640, 640)
         field_params(640,640)
         GLUT.glutMainLoop()
         print("Fuck")
-
 
     def _initGL(self,Width,Height):
         global real_width, real_height
@@ -266,13 +296,14 @@ class ScreenOpenGL(Screen):
         GL.glLoadIdentity()                    # Reset The Projection Matrix
                                             # Calculate The Aspect Ratio Of The Window
         GLU.gluPerspective(45.0, float(Width)/float(Height), 0.1, 100.0)
+
         self.width = Width
         self.height = Height
         real_width = Width
         real_height = Height
         self.quad = GLU.gluNewQuadric()
 
-    def _resizeGLScene(self,Width,Height):
+    def _resize(self,Width,Height):
         global real_width, real_height
         if Height == 0:
             Height = 1
@@ -300,9 +331,10 @@ class ScreenOpenGL(Screen):
     def write_inf(self,str):
         pass
 
-    def stop(self):
+    def __del__(self):
         GLUT.glutDestroyWindow(self.window)
-        sys.exit()
+        self._end()
+        # sys.exit()
 
     def getch(self):
         if ch != []:
@@ -337,19 +369,6 @@ class ScreenOpenGL(Screen):
                 GL.glVertex3f(speed.x,speed.y,-1)
                 GL.glEnd()
                 # print(str(obj._id)+str(pos))
-                print(tick)
-
-    def _loop(self):
-        global tick
-        self.clear()
-        self.loop_func(self.layers)
-        for layer in layers:
-            self.draw(layer)
-        self.update()
-        if self.getch() == b'q':
-            self.stop()
-        tick += 1
-
 
 class Layer:
     """ Класс слоя. Клеточный автомат, который воздейсвтует на объекты """
@@ -377,7 +396,7 @@ class Layer:
         _R = int(round(R))
         dx = int(pos[0])
         dy = int(pos[1])
-        for x,y in _get_under[_R-1]:
+        for x,y in self._get_under[_R-1]:
             x += dx
             x %= self.width
             y += dy
@@ -895,18 +914,16 @@ Informations = []
 
 print("Init Screen and start main loop...")
 
-screen = None
-
 if args.screen == 'curses':
-    # _get_under = _init_get_under_new()
-    # screen = ScreenCurses()
-    print("Not supported in this version")
+    print("Start screen...")
+    ScreenCurses(step,layers)
 elif args.screen == 'opengl':
-    ScreenOpenGL(step,layers,screen)
+    print("Start screen...")
+    ScreenOpenGL(step,layers)
 else:
-    screen = Screen()
+    Screen()
 
-
+print("dfdfff")
 
 # if __name__ == '__main__':
 
