@@ -23,6 +23,9 @@ def getpair(a,b): #костыль для быстродействия
 def gamecoord_to_screen(x):
     return x * k_screen
 
+def write_inf(str,*attr):
+    Informations.append((str,attr))
+
 def get_min_distance(param,p1,p2): #проверена
     """ Возвращает минимальное расстояние между двумя точками на поле """
     _p1 = [p1.x, p1.y]
@@ -64,11 +67,7 @@ def write_arr(arr):
             print("%.2f" %el,end=', ')
         print(']')
 
-def write_inf(str_):
-    Informations.append(str_)
-
 def _init_get_under_new():
-    global real_width,real_height
     maxR = round(min(real_width/2,real_height/2))
     _get_under = [[] for r in range(maxR)]
     v_0 = Vector(0,0)
@@ -142,18 +141,19 @@ class Screen:
     def _end(self):
         global tick
         print("Ticks: %d" %tick)
+
     def __del__(self):
         """ Деструктор класса """
         pass
 
 import curses
 
-class ScreenCurses(Screen):
-    def __init__(self,loop_func,layers):
-        global real_width, real_height
+class ScreenCursesInfoBackUp(Screen):
+    def __init__(self):
+        Screen.__init__(self,"Curses Screen")
+        self._init_curses()
 
-        Screen.__init__(self,"Curses Screen",loop_func,layers)
-
+    def _init_curses(self):
         print("Init sprites...")
         self._get_under = _init_get_under_new()
 
@@ -166,15 +166,10 @@ class ScreenCurses(Screen):
         self._scr.keypad(1)
         self._scr.clear()
         self._scr.nodelay(1)
-        real_height,real_width = self._scr.getmaxyx()
-        real_height -= 1
-        self.width = real_width
-        self.height = real_height
+        self.height,self.width = self._scr.getmaxyx()
+        self.height -= 1
         self.wrt_pos = 0
         self.ch = None
-        while self._loop(): # запускаем главный цикл
-            pass
-        print("ned")
 
     def line(self,pos,vect,color):
         def _from(a,b):
@@ -209,9 +204,9 @@ class ScreenCurses(Screen):
         dy = int(pos[1])
         for x,y in self._get_under[_R-1]:
             x += dx
-            x %= real_width
+            x %= self.width
             y += dy
-            y %= real_height
+            y %= self.height
             func(x,y,*args)
 
     def draw(self,layer):
@@ -236,16 +231,15 @@ class ScreenCurses(Screen):
         self._scr.refresh()
 
     def clear(self):
-        for y in range(real_height):
-                self.write((0,y),' ' * real_width)
+        for y in range(self.height):
+                self.write((0,y),' ' * self.width)
         self.wrt_pos = 0
 
     def write(self,pos,str,*attr):
-        self._scr.addstr(int(pos[1] % real_height),int(pos[0] % real_width),str,*attr)
+        self._scr.addstr(int(pos[1] % self.height),int(pos[0] % self.width),str,*attr)
 
-    def write_inf(self,str,*attr):
-        self._scr.addstr(self.wrt_pos % real_height,1,str,*attr)
-        self.wrt_pos += 1
+    def write_inf(self):
+        pass
 
     def write_ch(self,pos,ch,*attr):
         self._scr.addch(pos[1],pos[0],ch,*attr)
@@ -260,6 +254,75 @@ class ScreenCurses(Screen):
         self._scr.keypad(0)
         self._scr.nodelay(1)
 
+class ScreenCursesInfo(Screen):
+    def __init__(self):
+        Screen.__init__(self,"Curses Info Screen",None,None)
+        self._init_curses()
+
+    def _init_curses(self):
+        # print("Init sprites...")
+        # self._get_under = _init_get_under_new()
+        self._scr = curses.initscr()
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
+        curses.init_pair(2, curses.COLOR_RED, curses.COLOR_WHITE)
+        curses.noecho()
+        curses.cbreak()
+        self._scr.keypad(1)
+        self._scr.clear()
+        self._scr.nodelay(1)
+        self.height,self.width = self._scr.getmaxyx()
+        self.height -= 1
+        self.wrt_pos = 0
+        self.ch = None
+
+    def draw(self):
+        self.clear()
+        self.write_inf()
+        self.update()
+
+    def update(self):
+        self._scr.refresh()
+
+    def clear(self):
+        for y in range(self.height):
+                self.write((0,y),' ' * self.width)
+        self.wrt_pos = 0
+
+    def write(self,pos,str,*attr):
+        self._scr.addstr(int(pos[1] % self.height),int(pos[0] % self.width),str,*attr)
+
+    def write_inf(self):
+        global Informations
+        for (string,attr) in Informations:
+            self._scr.addstr(self.wrt_pos % self.height,1,str(string))
+            self.wrt_pos += 1
+        Informations = []
+
+    def write_ch(self,pos,ch,*attr):
+        self._scr.addch(pos[1],pos[0],ch,*attr)
+
+    def getch(self):
+        return self._scr.getch()
+
+    def __del__(self):
+        curses.nocbreak()
+        curses.echo()
+        curses.endwin()
+        self._scr.keypad(0)
+        self._scr.nodelay(1)
+
+class ScreenPrintInfo(Screen):
+    def __init__(self):
+        Screen.__init__(self,"Print Info Screen",None,None)
+    def write_inf(self):
+        global Informations
+        for (string,attr) in Informations:
+            print(string,*attr)
+        Informations = []
+    def draw(self):
+        self.write_inf()
+
 class ScreenOpenGL(Screen):
     def __init__(self,loop_func,layers):
         """ Инициализирует экран и запускает его, потом всю программу """
@@ -270,53 +333,54 @@ class ScreenOpenGL(Screen):
         self.ch = []
 
         print("Fuck")
+        self.infoScreen = ScreenCursesInfo()
         GLUT.glutInit(sys.argv)
         GLUT.glutInitDisplayMode(GLUT.GLUT_RGBA | GLUT.GLUT_DOUBLE | GLUT.GLUT_ALPHA | GLUT.GLUT_DEPTH)
-        GLUT.glutInitWindowSize(640, 640)
+        GLUT.glutInitWindowSize(640, 480)
         GLUT.glutInitWindowPosition(0, 0)
         self.window = GLUT.glutCreateWindow(b"Project Evoluo alpha")
         GLUT.glutDisplayFunc(self._loop) # Функция, отвечающая за рисование
         GLUT.glutIdleFunc(self._loop) # При простое перерисовывать
         GLUT.glutReshapeFunc(self._resize) # изменяет размеры окна
         GLUT.glutKeyboardFunc(self._keyPressed) # Обрабатывает нажатия
-        self._initGL(640, 640)
-        field_params(640,640)
+        self._initGL(640, 480)
+        field_params(640, 480)
         GLUT.glutMainLoop()
         print("Fuck")
 
     def _initGL(self,Width,Height):
-        global real_width, real_height
         GL.glClearColor(0.0, 0.0, 0.0, 0.0)    # This Will Clear The Background Color To Black
         GL.glClearDepth(1.0)                   # Enables Clearing Of The Depth Buffer
         GL.glDepthFunc(GL.GL_LESS)                # The Type Of Depth Test To Do
-        GL.glEnable(GL.GL_DEPTH_TEST)             # Enables Depth Testing
-        GL.glShadeModel(GL.GL_SMOOTH)             # Enables Smooth Color Shading
-        
-        GL.glMatrixMode(GL.GL_PROJECTION)
-        GL.glLoadIdentity()                    # Reset The Projection Matrix
-                                            # Calculate The Aspect Ratio Of The Window
-        GLU.gluPerspective(45.0, float(Width)/float(Height), 0.1, 100.0)
+        GL.glHint(GL.GL_LINE_SMOOTH_HINT, GL.GL_NICEST)
+        GL.glEnable(GL.GL_BLEND);                         # Enable Blending
+        GL.glLineWidth(1.);
+        GL.glDisable(GL.GL_LINE_SMOOTH)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA);
 
         self.width = Width
         self.height = Height
-        real_width = Width
-        real_height = Height
         self.quad = GLU.gluNewQuadric()
 
     def _resize(self,Width,Height):
-        global real_width, real_height
         if Height == 0:
             Height = 1
         self.width = Width
         self.height = Height
-        real_width = Width
-        real_height = Height
         field_params(Width,Height)
 
         GL.glViewport(0, 0, Width, Height)       # Reset The Current Viewport And Perspective Transformation
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
-        GLU.gluPerspective(45.0, float(Width)/float(Height), 0.1, 100.0)
+
+        GL.glOrtho(0.0,Width,Height,0.0,-1.0,1.0)
+
+        GL.glMatrixMode(GL.GL_MODELVIEW)                   # Select The Modelview Matrix
+        GL.glLoadIdentity()
+
+        write_inf(width,height)
+        write_inf(Width,Height)
+        write_inf(k_screen)
 
     def update(self):
         GLUT.glutSwapBuffers()
@@ -328,11 +392,9 @@ class ScreenOpenGL(Screen):
     def write(self,pos,str):
         pass
 
-    def write_inf(self,str):
-        pass
-
     def __del__(self):
         GLUT.glutDestroyWindow(self.window)
+        self.infoScreen.__del__()
         self._end()
         # sys.exit()
 
@@ -346,29 +408,32 @@ class ScreenOpenGL(Screen):
             print(args)
 
     def draw(self,layer):
+        global width,height
         if layer.__class__ == LayerObjects:
             for obj in layer.get_objs():
                 pos = obj.get_pos_screen()
                 # Кружок
                 GL.glLoadIdentity()
-                GL.glTranslatef(pos[0]/320-1,pos[1]/320-1,0)
-                GL.glColor3f(0,obj._get_lifestate()/2+0.5,0)
-                GLU.gluDisk(self.quad,0,obj.radius/50,40,1)
+                GL.glTranslatef(pos[0]-1,pos[1]-1,0)
+                GL.glColor3f(0,obj._get_lifestate()*0.9+0.1,1-obj.age/100)
+                GLU.gluDisk(self.quad,0,obj.radius*k_screen,30,1)
                 #Стрелочки-направления
                 att = Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
                         obj.pos[1],
                         isPolar = True
-                        ) / 320
-                speed = obj.speed[0] 
+                        ) * k_screen
+                speed = obj.speed[0] * k_screen
                 GL.glBegin(GL.GL_LINES)
                 GL.glColor3f(1,0,0)
                 GL.glVertex3f(0,0,-1)
                 GL.glVertex3f(att.x,att.y,-1)
                 GL.glColor3f(0,0,1)
-                GL.glVertex3f(0,0,-1)
-                GL.glVertex3f(speed.x,speed.y,-1)
+                GL.glVertex3f(0,0,-0.5)
+                GL.glVertex3f(speed.x,speed.y,-1.1)
                 GL.glEnd()
-                # print(str(obj._id)+str(pos))
+                write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
+            # write_inf("=====")
+            self.infoScreen.draw()
 
 class Layer:
     """ Класс слоя. Клеточный автомат, который воздейсвтует на объекты """
@@ -644,6 +709,7 @@ class Object:
         self._attack = 0 #сила атаки
         self._attack_range = attack_range #дальность атаки
         self._id = id
+        self.age = 0
 
     def _move(self): 
         """ Передвигает объект на вектор """
@@ -653,6 +719,9 @@ class Object:
         self.pos[0] += self.speed[0] * dt#поступательная скорость
         self.pos[0].x %= width
         self.pos[0].y %= height
+
+        # Движение означает, что шаг завершён, поэтому
+        self.age += 1
 
     def get_strong(self):
         """ Возвращает текущую силу, которая зависит от многих параметров. Чем больше максимальная энергия -- тем сильнее организм, поэтому energy/maxenergy * maxenergy = energy """
@@ -860,8 +929,8 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
         layer.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
     elif test == '15':
-        layer.create_obj(ObjectBot( pos = (25,38,0),radius = 2,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
-        layer.create_obj(ObjectBot( pos = (30,38,math.pi),radius = 2.1,speed = (-1,0,0), strong = 1, energy = 0.9))
+        layer.create_obj(ObjectBot( pos = (25,38,0),radius = 5,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (30,38,math.pi),radius = 5,speed = (-1,0,0), strong = 1, energy = 0.9))
     elif test == '16':
         layer.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
         layer.create_obj(ObjectBot( pos = (30,38,0),radius = 2,speed = (-1,0,0), strong = 1, energy = 0.9))
@@ -869,9 +938,17 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (0,38,0),radius = 2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
     elif test == '18':
         layer.create_obj(ObjectBot( pos = (10,50,math.pi/2),radius = 1,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
+    elif test == '19':
+        layer.create_obj(ObjectBot( pos = (0,0,-math.pi/2),radius = 10,speed = (0,0,0),energy = 0,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (100,100,math.pi/2),radius = 10,speed = (0,0,0),energy = 0,strong = 1,maxenergy = 1))
+    elif test == '20':
+        layer.create_obj(ObjectBot( pos = (38,20,math.pi/2),radius = 5,speed = (0,1,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (38,30,-math.pi/2),radius = 5,speed = (0,-1,0), strong = 1, energy = 0.9))
 
 def field_params(real_width,real_height):
     global width,height,k_screen
+    width = 100
+    height = 100
     if real_width > real_height:
         height = width / real_width * real_height
     else:
@@ -892,9 +969,7 @@ else:
     dt = float(args.deltat) # сек^-1
 width = 100
 height = 100
-real_width = 200
-real_height = 200
-k_screen = real_width / width
+# field param
 print("Layers:")
 layer_viscosity = LayerViscosity()
 print("Viscosity")
@@ -916,7 +991,7 @@ print("Init Screen and start main loop...")
 
 if args.screen == 'curses':
     print("Start screen...")
-    ScreenCurses(step,layers)
+    ScreenCursesOut (step,layers)
 elif args.screen == 'opengl':
     print("Start screen...")
     ScreenOpenGL(step,layers)
