@@ -127,17 +127,20 @@ class Screen:
             del(self)
             return 0
         else:
-            self.clear()
-            self.loop_func(self.layers)
-            for layer in layers:
-                self.draw(layer)
-
-            self.update()
-
-            self.ch = self.getch()
             tick += 1
-            return 1
+            return self._main()
+    def _main(self):
+        self.clear()
+        self.loop_func(self.layers)
+        for layer in layers:
+            self.draw(layer)
 
+        self.update()
+
+        self.ch = self.getch()
+        
+        return 1
+    
     def _end(self):
         global tick
         print("Ticks: %d" %tick)
@@ -161,11 +164,11 @@ class ScreenCursesInfoBackUp(Screen):
         curses.start_color()
         curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
         curses.init_pair(2, curses.COLOR_RED, curses.COLOR_WHITE)
-        curses.noecho()
-        curses.cbreak()
-        self._scr.keypad(1)
+        # curses.noecho()
+        # curses.cbreak()
+        # self._scr.keypad(1)
         self._scr.clear()
-        self._scr.nodelay(1)
+        # self._scr.nodelay(1)
         self.height,self.width = self._scr.getmaxyx()
         self.height -= 1
         self.wrt_pos = 0
@@ -248,11 +251,11 @@ class ScreenCursesInfoBackUp(Screen):
         return self._scr.getch()
 
     def __del__(self):
-        curses.nocbreak()
-        curses.echo()
+        # curses.nocbreak()
+        # curses.echo()
         curses.endwin()
-        self._scr.keypad(0)
-        self._scr.nodelay(1)
+        # self._scr.keypad(0)
+        # self._scr.nodelayd(1)
 
 class ScreenCursesInfo(Screen):
     def __init__(self):
@@ -322,6 +325,13 @@ class ScreenPrintInfo(Screen):
         Informations = []
     def draw(self):
         self.write_inf()
+
+class ScreenStandart(Screen):
+    def __init__(self,loop_func,layers):
+        Screen.__init__(self,"Standart Screen",loop_func,layers)
+        global tick
+        for tick in range(1,1000):
+            self._main()
 
 class ScreenOpenGL(Screen):
     def __init__(self,loop_func,layers):
@@ -393,8 +403,8 @@ class ScreenOpenGL(Screen):
         pass
 
     def __del__(self):
+        del(self.infoScreen)
         GLUT.glutDestroyWindow(self.window)
-        self.infoScreen.__del__()
         self._end()
         # sys.exit()
 
@@ -410,12 +420,16 @@ class ScreenOpenGL(Screen):
     def draw(self,layer):
         global width,height
         if layer.__class__ == LayerObjects:
+            attacked = layer._attacked
             for obj in layer.get_objs():
+                pos = obj.get_pos()
+                write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
                 pos = obj.get_pos_screen()
                 # Кружок
                 GL.glLoadIdentity()
                 GL.glTranslatef(pos[0]-1,pos[1]-1,0)
-                GL.glColor3f(0,obj._get_lifestate()*0.9+0.1,1-obj.age/100)
+                red = attacked.get(obj._id,0)
+                GL.glColor3f(red,obj._get_lifestate()*0.9+0.1,1-obj.age/100)
                 GLU.gluDisk(self.quad,0,obj.radius*k_screen,30,1)
                 #Стрелочки-направления
                 att = Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
@@ -431,8 +445,7 @@ class ScreenOpenGL(Screen):
                 GL.glVertex3f(0,0,-0.5)
                 GL.glVertex3f(speed.x,speed.y,-1.1)
                 GL.glEnd()
-                write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
-            # write_inf("=====")
+                
             self.infoScreen.draw()
 
 class Layer:
@@ -497,7 +510,7 @@ class LayerObjects(Layer):
         self.height = h
         self._objs = {}
         self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
-
+        self._attacked = {}
     def _generate_id(self):
         """ Генерирует уникальный id. В будущем переделать """
         return random.randint(0,10000000)
@@ -536,7 +549,7 @@ class LayerObjects(Layer):
 
     def _eat(self,obj1,obj2):
         """ Поедание """
-        if obj2.status <= 0:
+        if (obj2.status <= 0) and (obj1.status > 0):
             write_inf("Eat: %d --> %d" %(obj2._id,obj1._id))
             obj2.mass -= 1 * dt # За один тик убавляется 1 жизнь
             if obj2._change_state() != -1:
@@ -561,37 +574,44 @@ class LayerObjects(Layer):
             phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
 
             # Меняем скорости, если они столкнулись только что
-            if self._colliding[0].count(getpair(id1,id2)) == 0:
-                def _get(m1,m2,v1,v2):
-                    """ уравнение полученных скоростей, чтобы по 10 раз не писать одно и то же """ 
-                    return (v1 * (m1 - m2) + v2 * 2 * m2) / (m1 + m2)
-                v1.phi -= phi # поворот так, что линия есть OX 
-                v2.phi -= phi
-                _v1 = v1.copy()
-                _v2 = v2.copy()
-                V1before = _v1.copy()
-                V2before = _v2.copy()
-                _v1.x = _get(m1,m2,v1.x,v2.x) # взаимодействуют
-                _v2.x = _get(m2,m1,v2.x,v1.x)
-                dv1 = abs((_v1 - V1before).x)
-                dv2 = abs((_v2 - V2before).x)
-                _v1.phi += phi #поворачиваем обратно
-                _v2.phi += phi
-                obj1.speed[0] = _v1
-                obj2.speed[0] = _v2
+            if (obj1.status > 1) and (obj2.status > 1):
+                if self._colliding[0].count(getpair(id1,id2)) == 0:
+                    def _get(m1,m2,v1,v2):
+                        """ уравнение полученных скоростей, чтобы по 10 раз не писать одно и то же """ 
+                        return (v1 * (m1 - m2) + v2 * 2 * m2) / (m1 + m2)
+                    v1.phi -= phi # поворот так, что линия есть OX 
+                    v2.phi -= phi
+                    _v1 = v1.copy()
+                    _v2 = v2.copy()
+                    V1before = _v1.copy()
+                    V2before = _v2.copy()
+                    _v1.x = _get(m1,m2,v1.x,v2.x) # взаимодействуют
+                    _v2.x = _get(m2,m1,v2.x,v1.x)
 
-                mass12 = obj2.mass / obj1.mass
-                obj1.speed[1] -= (w2 * mass12 + w1) / 10 # сохраняем импульс и передаём 1/10 от угловой скорости FACTOR
-                obj2.speed[1] -= (w1 / mass12 + w2) / 10
+                    dv1 = abs((_v1 - V1before).x)
+                    dv2 = abs((_v2 - V2before).x)
+                    _v1.phi += phi #поворачиваем обратно
+                    _v2.phi += phi
+                    # Применяем скорости
+                    obj1.speed[0] = _v1
+                    obj2.speed[0] = _v2
 
-                if dv1>obj1.get_strong():
-                    obj1.energy(-(dv1-obj1.get_strong()))
-                if dv2/m2>obj2.get_strong():
-                    obj2.energy(-(dv2-obj2.get_strong()))
-            else:
-                F = Vector(inside,phi,isPolar = True)
-                obj1._add_accel([-F,0]) #добавляем ускорение
-                obj2._add_accel([F,0])
+                    mass12 = obj2.mass / obj1.mass
+                    obj1.speed[1] -= (w2 * mass12 + w1) / 10 # сохраняем импульс и передаём 1/10 от угловой скорости FACTOR
+                    obj2.speed[1] -= (w1 / mass12 + w2) / 10
+
+                    if dv1>obj1.get_strong():
+                        obj1.energy(-(dv1-obj1.get_strong()))
+                    if dv2/m2>obj2.get_strong():
+                        obj2.energy(-(dv2-obj2.get_strong()))
+                else:
+                    F = Vector(inside,phi,isPolar = True)
+                    obj1._add_accel([-F,0]) #добавляем ускорение
+                    obj2._add_accel([F,0])
+            elif (obj1.status > 1) or (obj2.status > 1):
+                str = obj1.get_strong() * (obj1.status > 1)  + obj2.get_strong() * (obj2.status > 1)
+                obj1._add_accel((Vector(str,phi,isPolar = True),0))
+                obj2._add_accel((Vector(- str,phi,isPolar = True),0))
 
             # Съедает
             for a,b in [(obj1,obj2),(obj2,obj1)]:
@@ -631,16 +651,20 @@ class LayerObjects(Layer):
                             omega = 0
                         b.energy (- f_at)
                         b._add_accel((OO.one() * f_at, omega)) #отталкиваем и крутим противника
+                        return f_at
+        return 0
 
     def attack(self):
         _objs = self.get_objs()
-        lenght = len(_objs)
+        # lenght = len(_objs)
+        self._attacked = {}
         for a in _objs:
             for b in _objs:
                 if (a != b):
                     inside = (get_min_distance((self.width,self.height),a.pos[0],b.pos[0]) - (a.radius+b.radius)) / 2
                     if inside < a._attack_range:
-                        self._attack(a,b) # Атакует a
+                        attack = self._attack(a,b) # Атакует a
+                        self._attacked.update({b._id:attack})
 
 
     def step(self,layers):
@@ -906,7 +930,7 @@ def tests(test,layer):
     if test == None:
         for i in range(random.randint(1,100)):
             maxenergy = random.random() + 0.5
-            layer.create_obj(ObjectBot(pos = (random.random()*width,random.random()*height,random.random()*2*math.pi),energy = random.random() * maxenergy,maxenergy = maxenergy,radius = random.random()*1+2))
+            layer.create_obj(ObjectBot(pos = (random.random()*width,random.random()*height,random.random()*2*math.pi),energy = random.random() * maxenergy,maxenergy = maxenergy,radius = random.random()*2+1))
     elif test == '1':
         layer.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
         layer.create_obj(ObjectBot( pos = (40,40,0),radius = 5,speed = (-1,0,-1), energy = 0.9 ))
@@ -1016,7 +1040,7 @@ elif args.screen == 'opengl':
     print("Start screen...")
     ScreenOpenGL(step,layers)
 else:
-    Screen()
+    ScreenStandart(step,layers)
 
 print("dfdfff")
 
