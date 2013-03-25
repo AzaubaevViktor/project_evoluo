@@ -6,10 +6,13 @@
 Итак, что вообще и как происходит.
 В главном цикле вызывается функция step(), которая перебирает все слои и отдаёт им массив со всеми слоями.
 """
-import random,math,pdb,noise,argparse,copy
+import random,math,pdb,noise,argparse,copy,sys
 import time as time_
 import vect
 from vect import Vector
+import OpenGL.GL as GL
+import OpenGL.GLUT as GLUT
+import OpenGL.GLU as GLU
 
 def getpair(a,b): #костыль для быстродействия
     if a>b:
@@ -19,6 +22,9 @@ def getpair(a,b): #костыль для быстродействия
 
 def gamecoord_to_screen(x):
     return x * k_screen
+
+def write_inf(str,*attr):
+    Informations.append((str,attr))
 
 def get_min_distance(param,p1,p2): #проверена
     """ Возвращает минимальное расстояние между двумя точками на поле """
@@ -62,7 +68,6 @@ def write_arr(arr):
         print(']')
 
 def _init_get_under_new():
-    global real_width,real_height,screen
     maxR = round(min(real_width/2,real_height/2))
     _get_under = [[] for r in range(maxR)]
     v_0 = Vector(0,0)
@@ -82,16 +87,17 @@ def _init_get_under_new():
                         + [[-x,-y] for x,y in _quart]
                         + [[x,0] for x in range(-R,R+1)]
                         + [[0,y] for y in range(-R,R+1) if y != 0])
-        screen.write((0,0),"%d" % (R))
-        screen.update()
     return _get_under
 
 class Screen:
     """ Суперкласс экрана. Служит основой для других классов """
-    def __init__(self):
+    def __init__(self,type_screen,loop_func,layers):
         """ Инициализирует экран """
-        self.type = "Default Screen"
-        self._scr = None
+        self.type = type_screen
+        self.width = 0
+        self.height = 0
+        self.loop_func = loop_func
+        self.layers = layers
         pass
     def draw(self,layer):
         """ Расует слой """
@@ -114,16 +120,43 @@ class Screen:
         pass
     def getch(self):
         return 0
+    def _loop(self):
+        global tick
+        if (self.ch == b'q') or (self.ch == b'\xb1') or (self.ch == 27) or (self.ch == 113):
+            self.__del__()
+            del(self)
+            return 0
+        else:
+            self.clear()
+            self.loop_func(self.layers)
+            for layer in layers:
+                self.draw(layer)
+
+            self.update()
+
+            self.ch = self.getch()
+            tick += 1
+            return 1
+
+    def _end(self):
+        global tick
+        print("Ticks: %d" %tick)
+
     def __del__(self):
         """ Деструктор класса """
         pass
 
 import curses
 
-class Curses(Screen):
+class ScreenCursesInfoBackUp(Screen):
     def __init__(self):
-        global real_width, real_height
-        self.type = "Curses Screen"
+        Screen.__init__(self,"Curses Screen")
+        self._init_curses()
+
+    def _init_curses(self):
+        print("Init sprites...")
+        self._get_under = _init_get_under_new()
+
         self._scr = curses.initscr()
         curses.start_color()
         curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
@@ -133,8 +166,10 @@ class Curses(Screen):
         self._scr.keypad(1)
         self._scr.clear()
         self._scr.nodelay(1)
-        real_height,real_width = self._scr.getmaxyx()
+        self.height,self.width = self._scr.getmaxyx()
+        self.height -= 1
         self.wrt_pos = 0
+        self.ch = None
 
     def line(self,pos,vect,color):
         def _from(a,b):
@@ -162,16 +197,16 @@ class Curses(Screen):
                         )
         pass
 
-    def get_under(self,pos,R,func,*args): # ДУБЛИРУЕМ ФУНКЦИОНАЛЬНОСТЬ
+    def get_under(self,pos,R,func,*args): # Удалить
         """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
         _R = int(round(R))
         dx = int(pos[0])
         dy = int(pos[1])
-        for x,y in _get_under[_R-1]:
+        for x,y in self._get_under[_R-1]:
             x += dx
-            x %= real_width
+            x %= self.width
             y += dy
-            y %= real_height
+            y %= self.height
             func(x,y,*args)
 
     def draw(self,layer):
@@ -180,7 +215,7 @@ class Curses(Screen):
                 pos = obj.get_pos_screen()
                 def _wrt(x,y):
                     self.write((x,y)," ",curses.A_REVERSE)
-                self.get_under(pos,obj.radius * k_screen,_wrt) # рисуем круг
+                self.get_under(pos,obj.radius * k_screen,_wrt) # Исправить на Layer. ...
                 self.line(
                     pos,
                     gamecoord_to_screen(
@@ -196,17 +231,15 @@ class Curses(Screen):
         self._scr.refresh()
 
     def clear(self):
-        for y in range(real_height):
-                self.write((0,y),' ' * real_width)
+        for y in range(self.height):
+                self.write((0,y),' ' * self.width)
         self.wrt_pos = 0
-        #self._scr.clear()
 
     def write(self,pos,str,*attr):
-        self._scr.addstr(int(pos[1] % real_height),int(pos[0] % real_width),str,*attr)
+        self._scr.addstr(int(pos[1] % self.height),int(pos[0] % self.width),str,*attr)
 
-    def write_inf(self,str,*attr):
-        self._scr.addstr(self.wrt_pos % real_height,1,str,*attr)
-        self.wrt_pos += 1
+    def write_inf(self):
+        pass
 
     def write_ch(self,pos,ch,*attr):
         self._scr.addch(pos[1],pos[0],ch,*attr)
@@ -220,6 +253,187 @@ class Curses(Screen):
         curses.endwin()
         self._scr.keypad(0)
         self._scr.nodelay(1)
+
+class ScreenCursesInfo(Screen):
+    def __init__(self):
+        Screen.__init__(self,"Curses Info Screen",None,None)
+        self._init_curses()
+
+    def _init_curses(self):
+        # print("Init sprites...")
+        # self._get_under = _init_get_under_new()
+        self._scr = curses.initscr()
+        curses.start_color()
+        curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
+        curses.init_pair(2, curses.COLOR_RED, curses.COLOR_WHITE)
+        curses.noecho()
+        curses.cbreak()
+        self._scr.keypad(1)
+        self._scr.clear()
+        self._scr.nodelay(1)
+        self.height,self.width = self._scr.getmaxyx()
+        self.height -= 1
+        self.wrt_pos = 0
+        self.ch = None
+
+    def draw(self):
+        self.clear()
+        self.write_inf()
+        self.update()
+
+    def update(self):
+        self._scr.refresh()
+
+    def clear(self):
+        for y in range(self.height):
+                self.write((0,y),' ' * self.width)
+        self.wrt_pos = 0
+
+    def write(self,pos,str,*attr):
+        self._scr.addstr(int(pos[1] % self.height),int(pos[0] % self.width),str,*attr)
+
+    def write_inf(self):
+        global Informations
+        for (string,attr) in Informations:
+            self._scr.addstr(self.wrt_pos % self.height,1,str(string))
+            self.wrt_pos += 1
+        Informations = []
+
+    def write_ch(self,pos,ch,*attr):
+        self._scr.addch(pos[1],pos[0],ch,*attr)
+
+    def getch(self):
+        return self._scr.getch()
+
+    def __del__(self):
+        curses.nocbreak()
+        curses.echo()
+        curses.endwin()
+        self._scr.keypad(0)
+        self._scr.nodelay(1)
+
+class ScreenPrintInfo(Screen):
+    def __init__(self):
+        Screen.__init__(self,"Print Info Screen",None,None)
+    def write_inf(self):
+        global Informations
+        for (string,attr) in Informations:
+            print(string,*attr)
+        Informations = []
+    def draw(self):
+        self.write_inf()
+
+class ScreenOpenGL(Screen):
+    def __init__(self,loop_func,layers):
+        """ Инициализирует экран и запускает его, потом всю программу """
+        Screen.__init__(self,"OpenGL",loop_func,layers)
+
+        self.window = 0
+        self.quad = None
+        self.ch = []
+
+        print("Fuck")
+        self.infoScreen = ScreenCursesInfo()
+        GLUT.glutInit(sys.argv)
+        GLUT.glutInitDisplayMode(GLUT.GLUT_RGBA | GLUT.GLUT_DOUBLE | GLUT.GLUT_ALPHA | GLUT.GLUT_DEPTH)
+        GLUT.glutInitWindowSize(640, 480)
+        GLUT.glutInitWindowPosition(0, 0)
+        self.window = GLUT.glutCreateWindow(b"Project Evoluo alpha")
+        GLUT.glutDisplayFunc(self._loop) # Функция, отвечающая за рисование
+        GLUT.glutIdleFunc(self._loop) # При простое перерисовывать
+        GLUT.glutReshapeFunc(self._resize) # изменяет размеры окна
+        GLUT.glutKeyboardFunc(self._keyPressed) # Обрабатывает нажатия
+        self._initGL(640, 480)
+        field_params(640, 480)
+        GLUT.glutMainLoop()
+        print("Fuck")
+
+    def _initGL(self,Width,Height):
+        GL.glClearColor(0.0, 0.0, 0.0, 0.0)    # This Will Clear The Background Color To Black
+        GL.glClearDepth(1.0)                   # Enables Clearing Of The Depth Buffer
+        GL.glDepthFunc(GL.GL_LESS)                # The Type Of Depth Test To Do
+        GL.glHint(GL.GL_LINE_SMOOTH_HINT, GL.GL_NICEST)
+        GL.glEnable(GL.GL_BLEND);                         # Enable Blending
+        GL.glLineWidth(1.);
+        GL.glDisable(GL.GL_LINE_SMOOTH)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA);
+
+        self.width = Width
+        self.height = Height
+        self.quad = GLU.gluNewQuadric()
+
+    def _resize(self,Width,Height):
+        if Height == 0:
+            Height = 1
+        self.width = Width
+        self.height = Height
+        field_params(Width,Height)
+
+        GL.glViewport(0, 0, Width, Height)       # Reset The Current Viewport And Perspective Transformation
+        GL.glMatrixMode(GL.GL_PROJECTION)
+        GL.glLoadIdentity()
+
+        GL.glOrtho(0.0,Width,Height,0.0,-1.0,1.0)
+
+        GL.glMatrixMode(GL.GL_MODELVIEW)                   # Select The Modelview Matrix
+        GL.glLoadIdentity()
+
+        write_inf(width,height)
+        write_inf(Width,Height)
+        write_inf(k_screen)
+
+    def update(self):
+        GLUT.glutSwapBuffers()
+
+    def clear(self):
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+        GL.glLoadIdentity()                    # Reset The View 
+
+    def write(self,pos,str):
+        pass
+
+    def __del__(self):
+        GLUT.glutDestroyWindow(self.window)
+        self.infoScreen.__del__()
+        self._end()
+        # sys.exit()
+
+    def getch(self):
+        if ch != []:
+            return ch.pop(-1)[0]    
+
+    def _keyPressed(self,*args):
+        if args != None:
+            ch.append(args)
+            print(args)
+
+    def draw(self,layer):
+        global width,height
+        if layer.__class__ == LayerObjects:
+            for obj in layer.get_objs():
+                pos = obj.get_pos_screen()
+                # Кружок
+                GL.glLoadIdentity()
+                GL.glTranslatef(pos[0]-1,pos[1]-1,0)
+                GL.glColor3f(0,obj._get_lifestate()*0.9+0.1,1-obj.age/100)
+                GLU.gluDisk(self.quad,0,obj.radius*k_screen,30,1)
+                #Стрелочки-направления
+                att = Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
+                        obj.pos[1],
+                        isPolar = True
+                        ) * k_screen
+                speed = obj.speed[0] * k_screen
+                GL.glBegin(GL.GL_LINES)
+                GL.glColor3f(1,0,0)
+                GL.glVertex3f(0,0,-1)
+                GL.glVertex3f(att.x,att.y,-1)
+                GL.glColor3f(0,0,1)
+                GL.glVertex3f(0,0,-0.5)
+                GL.glVertex3f(speed.x,speed.y,-1.1)
+                GL.glEnd()
+                write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
+            # write_inf("=====")
+            self.infoScreen.draw()
 
 class Layer:
     """ Класс слоя. Клеточный автомат, который воздейсвтует на объекты """
@@ -247,7 +461,7 @@ class Layer:
         _R = int(round(R))
         dx = int(pos[0])
         dy = int(pos[1])
-        for x,y in _get_under[_R-1]:
+        for x,y in self._get_under[_R-1]:
             x += dx
             x %= self.width
             y += dy
@@ -323,7 +537,7 @@ class LayerObjects(Layer):
     def _eat(self,obj1,obj2):
         """ Поедание """
         if obj2.status <= 0:
-            screen.write_inf("Eat: %d --> %d" %(obj2._id,obj1._id))
+            write_inf("Eat: %d --> %d" %(obj2._id,obj1._id))
             obj2.mass -= 1 * dt # За один тик убавляется 1 жизнь
             if obj2._change_state() != -1:
                 obj2.radius = math.sqrt(obj2.mass)
@@ -408,7 +622,7 @@ class LayerObjects(Layer):
                 BH = math.sqrt(b.radius*b.radius - OH*OH)
                 f_at += BH
                 if f_at > 0:
-                    screen.write_inf("Attack: %d --> %d, by Str %.3f" %(a._id,b._id,f_at))
+                    write_inf("Attack: %d --> %d, by Str %.3f" %(a._id,b._id,f_at))
                     if b.status != 0:
                         f_at *= a._attack * a.get_strong() / a.radius #вычисляем силу атаки
                         if BH > 0.001: # вычисляем угловое ускорение
@@ -515,6 +729,7 @@ class Object:
         self._attack = 0 #сила атаки
         self._attack_range = attack_range #дальность атаки
         self._id = id
+        self.age = 0
 
     def _move(self): 
         """ Передвигает объект на вектор """
@@ -524,6 +739,9 @@ class Object:
         self.pos[0] += self.speed[0] * dt#поступательная скорость
         self.pos[0].x %= width
         self.pos[0].y %= height
+
+        # Движение означает, что шаг завершён, поэтому
+        self.age += 1
 
     def get_strong(self):
         """ Возвращает текущую силу, которая зависит от многих параметров. Чем больше максимальная энергия -- тем сильнее организм, поэтому energy/maxenergy * maxenergy = energy """
@@ -671,6 +889,8 @@ class ObjectBot(Object):
         """ Вызывает _impact_layer """
         self._impact_layer(layer)
 
+# ========================== PROGRAMM ============================
+
 def step(layers):
     for layer in layers:
         layer.step(layers)
@@ -678,155 +898,169 @@ def step(layers):
 def info():
     h = height - len(layer_obj._objs) - 2
     for obj in layer_obj._objs:
-        screen.write((0,h),str(obj)+' ')
+        write_inf(str(obj)+' ')
         h += 1
-    screen.write((0,h),'tick: %d; time: %.2f; half fps: %.2f; last fps: %.2f' % (tick,t2-t1,fps,last_fpc))
+    write_int('tick: %d; time: %.2f; half fps: %.2f; last fps: %.2f' % (tick,t2-t1,fps,last_fpc))
 
-width = 100
-height = 100
-real_width = 200
-real_height = 200
+def tests(test,layer):
+    if test == None:
+        for i in range(random.randint(1,100)):
+            maxenergy = random.random() + 0.5
+            layer.create_obj(ObjectBot(pos = (random.random()*width,random.random()*height,random.random()*2*math.pi),energy = random.random() * maxenergy,maxenergy = maxenergy,radius = random.random()*1+2))
+    elif test == '1':
+        layer.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
+        layer.create_obj(ObjectBot( pos = (40,40,0),radius = 5,speed = (-1,0,-1), energy = 0.9 ))
+        layer.create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+    elif test == '2':
+        layer.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (2,0,1),energy = 0.99 ))
+        layer.create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.99 ))
+    elif test == '3':
+        layer.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.3 ))
+    elif test == '4':
+        layer.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (-1,0,0),energy = 0.4 ))
+    elif test == '5':
+        layer.create_obj(ObjectBot( pos = (10,10,0),radius = 5,speed = (1,0,0),energy = 0.5 ))
+        layer.create_obj(ObjectBot( pos = (30,30,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+    elif test == '6':
+        layer.create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (1,0,1),energy = 0.6 ))
+        layer.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+    elif test == '7':
+        layer.create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (6,0,1),energy = 0.7 ))
+        layer.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-1,0,0), energy = 0.9 ))
+    elif test == '8':
+        layer.create_obj(ObjectBot( pos = (30,40,0),radius = 4,speed = (1,0,1),energy = 0.8 ))
+        layer.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-0.5,0,0), energy = 0.9 ))
+    elif test == '9':
+        layer.create_obj(ObjectBot( pos = (10,20,0),radius = 4,speed = (1,1,1),energy = 0.9 ))
+        layer.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (1,-1,0), energy = 0.9 ))
+    elif test == '10':
+        layer.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,0,0),energy = 0.2 ))
+        layer.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
+    elif test == '11':
+        layer.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.2 ))
+        layer.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,1,0), energy = 0.9 ))
+    elif test == '12':
+        layer.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.9 ))
+        layer.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,-1,0), energy = 0.9 ))
+    elif test == '13':
+        layer.create_obj(ObjectBot( pos = (13,38,math.pi*2/3),radius = 4,speed = (0,1,0),energy = 0.9, maxenergy = 1 ))
+        layer.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
+    elif test == '14':
+        layer.create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
+        layer.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
+    elif test == '15':
+        layer.create_obj(ObjectBot( pos = (25,38,0),radius = 5,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (30,38,math.pi),radius = 5,speed = (-1,0,0), strong = 1, energy = 0.9))
+    elif test == '16':
+        layer.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (30,38,0),radius = 2,speed = (-1,0,0), strong = 1, energy = 0.9))
+    elif test == '17':
+        layer.create_obj(ObjectBot( pos = (0,38,0),radius = 2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
+    elif test == '18':
+        layer.create_obj(ObjectBot( pos = (10,50,math.pi/2),radius = 1,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
+    elif test == '19':
+        layer.create_obj(ObjectBot( pos = (0,0,-math.pi/2),radius = 10,speed = (0,0,0),energy = 0,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (100,100,math.pi/2),radius = 10,speed = (0,0,0),energy = 0,strong = 1,maxenergy = 1))
+    elif test == '20':
+        layer.create_obj(ObjectBot( pos = (38,20,math.pi/2),radius = 5,speed = (0,1,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (38,30,-math.pi/2),radius = 5,speed = (0,-1,0), strong = 1, energy = 0.9))
 
-if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser(description='Evoluo prealpha')
-    parser.add_argument("-s","--screen",help="Type output screen:\n curses - curses screen \n screen -- no output")
-    parser.add_argument("-d","--deltat",help="Set interval of the tick. ")
-    parser.add_argument("-t","--test",help="Number of test. ")
-    args = parser.parse_args()
-
-    #Коэффициент шага
-    if args.deltat == None:
-        dt = 0.1
-    else:
-        dt = float(args.deltat) # сек^-1
-
-    flags = {"drawinfo":1,"run":1}
-
-    if args.screen == 'curses':
-        screen = Curses()
-    elif args.screen == "tkinter":
-        screen = ScreenTkinter()
-    else:
-        screen = Screen()
-
+def field_params(real_width,real_height):
+    global width,height,k_screen
+    width = 100
+    height = 100
     if real_width > real_height:
         height = width / real_width * real_height
     else:
         width = height / real_height * real_width
-
     k_screen = real_width / width
 
-    real_height -= 1
 
-    area = width * height
-    _get_under = _init_get_under_new()
+print("Parse...")
+parser = argparse.ArgumentParser(description='Evoluo prealpha')
+parser.add_argument("-s","--screen",help="Type output screen:\n curses - curses screen \n screen -- no output")
+parser.add_argument("-d","--deltat",help="Set interval of the tick. ")
+parser.add_argument("-t","--test",help="Number of test. ")
+args = parser.parse_args()
+print("Init...")
+if args.deltat == None:
+    dt = 0.1
+else:
+    dt = float(args.deltat) # сек^-1
+width = 100
+height = 100
+# field param
+print("Layers:")
+layer_viscosity = LayerViscosity()
+print("Viscosity")
+layer_obj = LayerObjects()
+tests(args.test,layer_obj)
+print("Object")
+layers = [layer_viscosity,layer_obj] # layer_obj должен быть всегда в конце, что бы объекты двигались, когда они уже 
+print("Ok")
 
-    layer_obj = LayerObjects()
+ch = []
+tick = 0
+t3 = t2 = t1 = time_.time()
+last_fps = fps = 0
+last_tick = 0
+k_mutation = 0.05
+Informations = []
 
-    if args.test == None:
-        for i in range(random.randint(1,100)):
-            maxenergy = random.random() + 0.5
-            layer_obj.create_obj(ObjectBot(pos = (random.random()*width,random.random()*height,random.random()*2*math.pi),energy = random.random() * maxenergy,maxenergy = maxenergy,radius = random.random()*1+2))
-    elif args.test == '1':
-        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.9 ))
-        layer_obj.create_obj(ObjectBot( pos = (40,40,0),radius = 5,speed = (-1,0,-1), energy = 0.9 ))
-        layer_obj.create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
-    elif args.test == '2':
-        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (2,0,1),energy = 0.99 ))
-        layer_obj.create_obj(ObjectBot( pos = (20,40,0),radius = 5,speed = (0,0,0), energy = 0.99 ))
-    elif args.test == '3':
-        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (1,0,0),energy = 0.3 ))
-    elif args.test == '4':
-        layer_obj.create_obj(ObjectBot( pos = (0,40,0),radius = 5,speed = (-1,0,0),energy = 0.4 ))
-    elif args.test == '5':
-        layer_obj.create_obj(ObjectBot( pos = (10,10,0),radius = 5,speed = (1,0,0),energy = 0.5 ))
-        layer_obj.create_obj(ObjectBot( pos = (30,30,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
-    elif args.test == '6':
-        layer_obj.create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (1,0,1),energy = 0.6 ))
-        layer_obj.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
-    elif args.test == '7':
-        layer_obj.create_obj(ObjectBot( pos = (30,40,0),radius = 5,speed = (6,0,1),energy = 0.7 ))
-        layer_obj.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-1,0,0), energy = 0.9 ))
-    elif args.test == '8':
-        layer_obj.create_obj(ObjectBot( pos = (30,40,0),radius = 4,speed = (1,0,1),energy = 0.8 ))
-        layer_obj.create_obj(ObjectBot( pos = (4,45,0),radius = 5,speed = (-0.5,0,0), energy = 0.9 ))
-    elif args.test == '9':
-        layer_obj.create_obj(ObjectBot( pos = (10,20,0),radius = 4,speed = (1,1,1),energy = 0.9 ))
-        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (1,-1,0), energy = 0.9 ))
-    elif args.test == '10':
-        layer_obj.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,0,0),energy = 0.2 ))
-        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,0,0), energy = 0.9 ))
-    elif args.test == '11':
-        layer_obj.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.2 ))
-        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,1,0), energy = 0.9 ))
-    elif args.test == '12':
-        layer_obj.create_obj(ObjectBot( pos = (10,35,0),radius = 4,speed = (0,1,0),energy = 0.9 ))
-        layer_obj.create_obj(ObjectBot( pos = (10,40,0),radius = 5,speed = (0,-1,0), energy = 0.9 ))
-    elif args.test == '13':
-        layer_obj.create_obj(ObjectBot( pos = (13,38,math.pi*2/3),radius = 4,speed = (0,1,0),energy = 0.9, maxenergy = 1 ))
-        layer_obj.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
-    elif args.test == '14':
-        layer_obj.create_obj(ObjectBot( pos = (13,38,math.pi/2),radius = 4,speed = (0,1,0),energy = 9.9,strong = 1.5,maxenergy = 10))
-        layer_obj.create_obj(ObjectBot( pos = (10,44,0),radius = 5,speed = (0,-1,0), energy = 0.9))
-    elif args.test == '15':
-        layer_obj.create_obj(ObjectBot( pos = (25,38,0),radius = 2,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
-        layer_obj.create_obj(ObjectBot( pos = (30,38,math.pi),radius = 2.1,speed = (-1,0,0), strong = 1, energy = 0.9))
-    elif args.test == '16':
-        layer_obj.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
-        layer_obj.create_obj(ObjectBot( pos = (30,38,0),radius = 2,speed = (-1,0,0), strong = 1, energy = 0.9))
-    elif args.test == '17':
-        layer_obj.create_obj(ObjectBot( pos = (0,38,0),radius = 2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
-    elif args.test == '18':
-        layer_obj.create_obj(ObjectBot( pos = (10,50,math.pi/2),radius = 1,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
+print("Init Screen and start main loop...")
 
-    layer_viscosity = LayerViscosity()
-    layers = [layer_viscosity,layer_obj] # layer_obj должен быть всегда в конце, что бы объекты двигались, когда они уже 
-    ch = 0 
-    tick = 0
-    t3 = t2 = t1 = time_.time()
-    last_fps = fps = 0
-    last_tick = 0
-    h0 = height - len(layer_obj._objs) - 2
-    k_mutation = 0.05
+if args.screen == 'curses':
+    print("Start screen...")
+    ScreenCursesOut (step,layers)
+elif args.screen == 'opengl':
+    print("Start screen...")
+    ScreenOpenGL(step,layers)
+else:
+    Screen()
 
-    while ch != 27:
-        if ch == 105: # i
-            flags["drawinfo"] += 1
-            flags["drawinfo"] %= 2
-        elif ch == 112: # p
-            flags["run"] += 1
-            flags["run"] %= 2
-            screen._scr.nodelay(flags['run'])
+print("dfdfff")
 
-        if flags['run']:
-            screen.clear()
-            if flags["drawinfo"]:
-                sum = 0
-                for obj in layer_obj.get_objs():
-                    screen.write_inf(str(obj)+' ')
-                    sum += obj.speed[0].r*obj.mass
-                screen.write_inf('Общий импульс системы:'+str(sum))
-                screen.write_inf('tick: %d; Gtime: %.2f; half fps: %.2f; last fps: %.2f' % (tick,tick*dt,fps,last_fps))
+# if __name__ == '__main__':
+
+    
+
+#     while ch != 27:
+#         if ch == 105: # i
+#             flags["drawinfo"] += 1
+#             flags["drawinfo"] %= 2
+#         elif ch == 112: # p
+#             flags["run"] += 1
+#             flags["run"] %= 2
+#             screen._scr.nodelay(flags['run'])
+
+#         if flags['run']:
+#             screen.clear()
+#             if flags["drawinfo"]:
+#                 sum = 0
+#                 for obj in layer_obj.get_objs():
+#                     screen.write_inf(str(obj)+' ')
+#                     sum += obj.speed[0].r*obj.mass
+#                 screen.write_inf('Общий импульс системы:'+str(sum))
+#                 screen.write_inf('tick: %d; Gtime: %.2f; half fps: %.2f; last fps: %.2f' % (tick,tick*dt,fps,last_fps))
             
-            step(layers) # Самое главное
-            tick += 1
-            t2 = time_.time()
-            if (tick - last_tick) - last_fps > 0.:
-                last_fps = (tick - last_tick) / (t2 - t3)
-                last_tick = tick 
-                t3 = t2
-            fps = 0
-            if t2 != t1:
-                fps = tick / (t2-t1)
+#             step(layers) # Самое главное
+#             tick += 1
+#             t2 = time_.time()
+#             if (tick - last_tick) - last_fps > 0.:
+#                 last_fps = (tick - last_tick) / (t2 - t3)
+#                 last_tick = tick 
+#                 t3 = t2
+#             fps = 0
+#             if t2 != t1:
+#                 fps = tick / (t2-t1)
 
-            screen.draw(layer_obj)
-            screen.update()
+#             screen.draw(layer_obj)
+#             screen.update()
 
-        # if args.screen != 'curses':
-            # if tick > 2000:
-                 # break
-        ch = screen.getch()
-        #screen.scr.addstr(22,0,str(c))
-    del screen
-    print("===========================================\nTicks = %d, half FPS: %.3f, last FPS: %.3f\n Width:%d, Height:%d" %(tick,fps,last_fps,width,height))
+#         # if args.screen != 'curses':
+#             # if tick > 2000:
+#                  # break
+#         ch = screen.getch()
+#         #screen.scr.addstr(22,0,str(c))
+#     del screen
+#     print("===========================================\nTicks = %d, half FPS: %.3f, last FPS: %.3f\n Width:%d, Height:%d" %(tick,fps,last_fps,width,height))
