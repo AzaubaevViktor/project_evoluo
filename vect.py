@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 #-*- coding:utf-8 -*-
 
-import math,pdb,copy
+import math
+from math import pi,sqrt,acos,cos,sin
 
 class Vector:
     """ Велосипед для работы с плоскими векторами """
     def __init__(self,a,b,isPolar = False):
         """ Создаёт вектор; 4 - cart, 5 - polar """ 
-        self.pi_2 = math.pi * 2
+        self.pi_2 = pi * 2
         if isPolar:
             self.a = [0, 0, a, b % self.pi_2, 0, 1]
         else:
@@ -19,13 +20,13 @@ class Vector:
             self.a[5] = 1
             x = self.a[0]
             y = self.a[1]
-            self.a[2] = r = math.sqrt(x*x+y*y)
+            self.a[2] = r = sqrt(x*x+y*y)
             if abs(x) > abs(r):
                 self.a[3] = 0.0
-            elif r != 0:
-                phi = math.acos(x/r)
+            elif r != 0.:
+                phi = acos(x/r)
                 if y < 0.:
-                    phi = 2. * math.pi - phi
+                    phi = - phi
                 self.a[3] = phi
             else:
                 self.a[3] = 0.0
@@ -36,8 +37,8 @@ class Vector:
             self.a[4] = 1
             r = self.a[2]
             phi = self.a[3]
-            self.a[0] = r*math.cos(phi)
-            self.a[1] = r*math.sin(phi)
+            self.a[0] = r*cos(phi)
+            self.a[1] = r*sin(phi)
 
     def __getattr__(self,name):
         if name == 'cart':
