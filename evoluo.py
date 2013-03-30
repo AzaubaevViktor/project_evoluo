@@ -324,6 +324,15 @@ class ScreenPrintInfo(Screen):
     def draw(self):
         self.write_inf()
 
+class ScreenStandartInfo(Screen):
+    def __init__(self):
+        Screen.__init__(self,"Standart Info Screen",None,None)
+    def write_inf(self):
+        global Informations
+        Informations = []
+    def draw(self):
+        self.write_inf()
+
 class ScreenStandart(Screen):
     def __init__(self,loop_func,layers):
         Screen.__init__(self,"Standart Screen",loop_func,layers)
@@ -341,7 +350,8 @@ class ScreenOpenGL(Screen):
         self.ch = []
 
         print("Fuck")
-        self.infoScreen = ScreenCursesInfo()
+        # self.infoScreen = ScreenCursesInfo()
+        self.infoScreen = ScreenStandartInfo()
         GLUT.glutInit(sys.argv)
         GLUT.glutInitDisplayMode(GLUT.GLUT_RGBA | GLUT.GLUT_DOUBLE | GLUT.GLUT_ALPHA | GLUT.GLUT_DEPTH)
         GLUT.glutInitWindowSize(640, 480)
