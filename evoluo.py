@@ -14,6 +14,7 @@ from vect import Vector
 import OpenGL.GL as GL
 import OpenGL.GLUT as GLUT
 import OpenGL.GLU as GLU
+import threading
 
 # для simm_r в зрении
 field_angle = [ [-3*pi/4, -pi/2, -pi/4],
@@ -89,13 +90,15 @@ def _init_get_under_new():
 
 class Screen:
     """ Суперкласс экрана. Служит основой для других классов """
-    def __init__(self,type_screen,loop_func,layers):
+    def __init__(self,type_screen,layers,layers_lock):
         """ Инициализирует экран """
         self.type = type_screen
         self.width = 0
         self.height = 0
-        self.loop_func = loop_func
+        self.layers_lock = layers_lock
         self.layers = layers
+        self._layers = None
+        self.last_tick = -1
         pass
     def draw(self,layer):
         """ Расует слой """
@@ -126,17 +129,30 @@ class Screen:
             return 0
         else:
             tick += 1
+            print("OGL:acquire")
+            self.layers_lock.acquire(1)
+            print("OGL:copy")
+            self._layers = copy.deepcopy(layers)
+            print("OGL:release", end = "")
+            self.layers_lock.release()
+            print("!")
+
             return self._main()
     def _main(self):
-        self.clear()
-        self.loop_func(self.layers)
-        for layer in layers:
-            self.draw(layer)
+        global tick
+        if self.last_tick != tick:
+            print("OGL:draw")
+            self.clear()
 
-        self.update()
+            # self.loop_func(self.layers)
+            for layer in layers:
+                self.draw(layer)
+
+            self.update()
+            self.last_tick = tick
 
         self.ch = self.getch()
-        
+
         return 1
     
     def _end(self):
@@ -341,9 +357,9 @@ class ScreenStandart(Screen):
             self._main()
 
 class ScreenOpenGL(Screen):
-    def __init__(self,loop_func,layers):
+    def __init__(self,layers,layers_lock):
         """ Инициализирует экран и запускает его, потом всю программу """
-        Screen.__init__(self,"OpenGL",loop_func,layers)
+        Screen.__init__(self,"OpenGL",layers,layers_lock)
 
         self.window = 0
         self.quad = None
@@ -744,7 +760,6 @@ class Mind_const(Mind):
         write_inf(str(self.mvnot)+str(self.angvel))
         return {"move":move, "attack":attack}
 
-
 class Sensor:
     """ Суперкласс сенсора. На вход -- слои, которые он обрабатывает и выдаёт информацию """
     def __init__(self,obj):
@@ -790,7 +805,6 @@ class Eyes(Sensor):
                 if (x == 1 == y) or (abs(abs_angl(field_angle[y][x]-sphi)) <= 0.55 * pi): # ~ 105/2 + 45
                     allowed.append([x,y])
 
-        # pdb.set_trace()
         out = [0,0,0,0,0,0,0] # 0 -- за пределами видимости r = 100, 0.5 - в фокусе r = f, 1 -- близко r = 0
         r = [100,100,100,100,100,100,100] # расстояния
         for (dx,dy) in allowed:
@@ -809,19 +823,6 @@ class Eyes(Sensor):
         # write_inf(str(r)+" %.3f" %self.focus)
 
         return [self.conversion(a + (a-self.focus) * random.normalvariate(0,0.2) ) for a in r]
-
-
-        # s = ["%3d" %(x + (x - self.focus) * random.normalvariate(0,0.2)) for x in r]
-
-        # for y in reversed(range(3)):
-        #     s = str(y)+':'
-        #     for x in range(3):
-        #         if [x,y] in allowed:
-        #             s += 'X'
-        #         else:
-        #             s += 'O'
-        #     write_inf(s)        
-        # write_inf(str(allowed)+str(sphi/pi*180))
 
 class Object: 
     """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив"""
@@ -1015,6 +1016,14 @@ class ObjectBot(Object):
 
 # ========================== PROGRAMM ============================
 
+def loop_step():
+    global layers
+    while 1:
+        print("STEP:test")
+        if not layers_lock.locked():
+            print("STEP:step")
+            step(layers)
+
 def step(layers):
     for layer in layers:
         layer.step(layers)
@@ -1101,10 +1110,6 @@ def tests(test,layer):
         for x in range(50):
             layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 2 + random.random()*2,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const()))
 
-
-
-
-
 def field_params(real_width,real_height):
     global width,height,k_screen
     width = 100
@@ -1146,6 +1151,7 @@ last_fps = fps = 0
 last_tick = 0
 k_mutation = 0.05
 Informations = []
+layers_lock = threading.Lock()
 
 if __name__ == '__main__':
     print("Init Screen and start main loop...")
@@ -1155,53 +1161,11 @@ if __name__ == '__main__':
         ScreenCursesOut (step,layers)
     elif args.screen == 'opengl':
         print("Start screen...")
-        ScreenOpenGL(step,layers)
+        step_thread = threading.Thread(target = loop_step)
+        step_thread.start()
+        out_thread = threading.Thread(target = ScreenOpenGL(layers,layers_lock))
+        # out_thread.start()
     else:
         ScreenStandart(step,layers)
 
-    print("dfdfff")
-
-# if __name__ == '__main__':
-
-    
-
-#     while ch != 27:
-#         if ch == 105: # i
-#             flags["drawinfo"] += 1
-#             flags["drawinfo"] %= 2
-#         elif ch == 112: # p
-#             flags["run"] += 1
-#             flags["run"] %= 2
-#             screen._scr.nodelay(flags['run'])
-
-#         if flags['run']:
-#             screen.clear()
-#             if flags["drawinfo"]:
-#                 sum = 0
-#                 for obj in layer_obj.get_objs():
-#                     screen.write_inf(str(obj)+' ')
-#                     sum += obj.speed[0].r*obj.mass
-#                 screen.write_inf('Общий импульс системы:'+str(sum))
-#                 screen.write_inf('tick: %d; Gtime: %.2f; half fps: %.2f; last fps: %.2f' % (tick,tick*dt,fps,last_fps))
-            
-#             step(layers) # Самое главное
-#             tick += 1
-#             t2 = time_.time()
-#             if (tick - last_tick) - last_fps > 0.:
-#                 last_fps = (tick - last_tick) / (t2 - t3)
-#                 last_tick = tick 
-#                 t3 = t2
-#             fps = 0
-#             if t2 != t1:
-#                 fps = tick / (t2-t1)
-
-#             screen.draw(layer_obj)
-#             screen.update()
-
-#         # if args.screen != 'curses':
-#             # if tick > 2000:
-#                  # break
-#         ch = screen.getch()
-#         #screen.scr.addstr(22,0,str(c))
-#     del screen
-#     print("===========================================\nTicks = %d, half FPS: %.3f, last FPS: %.3f\n Width:%d, Height:%d" %(tick,fps,last_fps,width,height))
+    print("Bye!")
