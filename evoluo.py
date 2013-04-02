@@ -8,7 +8,7 @@
 """
 import random,math,pdb,noise,argparse,copy,sys
 from math import sqrt,trunc,log,pi,sin,cos,tan,acos,asin,atan
-import time as time_
+import time
 import vect
 from vect import Vector
 import OpenGL.GL as GL
@@ -46,8 +46,10 @@ def write_inf(str,*attr):
 def get_min_distance(param,p1,p2): #проверена
     """ Возвращает минимальное расстояние между двумя точками на поле """
     _r = lambda x,y: sqrt(x*x + y*y)
-    return _r(p1.x - p2.x + trunc((p2.x - p1.x) / (0.5*param[0])) * param[0]
-        ,p1.y - p2.y + trunc((p2.y - p1.y) / (0.5*param[1])) * param[1])
+    dx = p1.x - p2.x
+    dy = p1.y - p2.y
+    return _r(dx + trunc(-dx / (0.5*param[0])) * param[0]
+        ,dy + trunc(-dy / (0.5*param[1])) * param[1])
 
 def get_distribution(param,f0):
     """ Возвращает функцию с распределением таким, что при deep = 0 и dx = w/2 dy = h/2 даёт 0.1, а при r = 0 даёт 1, формула 1/(x^alpha+1).
@@ -99,6 +101,7 @@ class Screen:
         self.layers = layers
         self._layers = None
         self.last_tick = -1
+        self.ch = b'\0'
         pass
     def draw(self,layer):
         """ Расует слой """
@@ -121,6 +124,8 @@ class Screen:
         pass
     def getch(self):
         return 0
+    def _draw_prepare(self):
+        self._layers = copy.deepcopy(layers)
     def _loop(self):
         global tick
         if (self.ch == b'q') or (self.ch == b'\xb1') or (self.ch == 27) or (self.ch == 113):
@@ -128,28 +133,38 @@ class Screen:
             del(self)
             return 0
         else:
-            tick += 1
-            print("OGL:acquire")
-            self.layers_lock.acquire(1)
-            print("OGL:copy")
-            self._layers = copy.deepcopy(layers)
-            print("OGL:release", end = "")
-            self.layers_lock.release()
-            print("!")
+            # tick += 1
+            # print("SCR:acquire")
+            if self.last_tick != tick:
+                tm1 = time.time()
+
+                self.layers_lock.acquire(1)
+                # print("SCR:copy")
+                self._draw_prepare()
+                # print("SCR:release")
+                self.layers_lock.release()
+                self.last_tick = tick
+
+                tm2 = time.time()
+                # print("SCR: copy on %.1fms" % ((tm2-tm1)*1000))
+            else:
+                pass
+                # print("DRAW: not change")
 
             return self._main()
     def _main(self):
         global tick
-        if self.last_tick != tick:
-            print("OGL:draw")
-            self.clear()
+        # print("SCR:draw")
+        tm1 = time.time()
+        self.clear()
 
-            # self.loop_func(self.layers)
-            for layer in layers:
-                self.draw(layer)
+        for layer in self._layers:
+            self.draw(layer)
 
-            self.update()
-            self.last_tick = tick
+        self.update()
+
+        tm2 = time.time()
+        # print("DRAW: on %.1fms" %((tm2-tm1)*1000))
 
         self.ch = self.getch()
 
@@ -354,7 +369,7 @@ class ScreenStandart(Screen):
         Screen.__init__(self,"Standart Screen",loop_func,layers)
         global tick
         for tick in range(1,1000):
-            self._main()
+            self._loop()
 
 class ScreenOpenGL(Screen):
     def __init__(self,layers,layers_lock):
@@ -379,10 +394,13 @@ class ScreenOpenGL(Screen):
         GLUT.glutKeyboardFunc(self._keyPressed) # Обрабатывает нажатия
         self._initGL(640, 480)
         field_params(640, 480)
-        GLUT.glutMainLoop()
         print("Fuck")
 
+    def run(self):
+        GLUT.glutMainLoop()
+        
     def _initGL(self,Width,Height):
+        GL.glShadeModel(GL.GL_SMOOTH); 
         GL.glClearColor(0.0, 0.0, 0.0, 0.0)    # This Will Clear The Background Color To Black
         GL.glClearDepth(1.0)                   # Enables Clearing Of The Depth Buffer
         GL.glDepthFunc(GL.GL_LESS)                # The Type Of Depth Test To Do
@@ -441,13 +459,21 @@ class ScreenOpenGL(Screen):
             ch.append(args)
             print(args)
 
+    def _draw_prepare(self):
+        del(self._layers)
+        self._layers = []
+        for layer in layers:
+            if layer.__class__ == LayerObjects:
+                self._layers.append([layer.type,copy.deepcopy(layer.get_objs()),copy.copy(layer._attacked)])
+
+
     def draw(self,layer):
         global width,height
-        if layer.__class__ == LayerObjects:
-            attacked = layer._attacked
-            for obj in layer.get_objs():
-                pos = obj.get_pos()
-                write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
+        if layer[0] == "Layer Objects":
+            attacked = layer[2]
+            for obj in layer[1]:
+                # pos = obj.get_pos()
+                # write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
                 pos = obj.get_pos_screen()
                 # Кружок
                 GL.glLoadIdentity()
@@ -457,7 +483,7 @@ class ScreenOpenGL(Screen):
                 else:
                     red = 0
                 GL.glColor3f(red,obj._get_lifestate()*0.9+0.1,1-obj.age/100)
-                GLU.gluDisk(self.quad,0,obj.radius*k_screen,30,1)
+                GLU.gluDisk(self.quad,0,obj.radius*k_screen,20,1)
                 #Стрелочки-направления
                 att = Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
                         obj.pos[1],
@@ -470,16 +496,17 @@ class ScreenOpenGL(Screen):
                 GL.glVertex3f(att.x,att.y,-1)
                 GL.glColor3f(0,0,1)
                 GL.glVertex3f(0,0,-0.5)
-                GL.glVertex3f(speed.x,speed.y,-1.1)
+                GL.glVertex3f(speed.x,speed.y,-1.100)
                 GL.glEnd()
                 
-            self.infoScreen.draw()
+        self.infoScreen.draw()
 
 class Layer:
     """ Класс слоя. Клеточный автомат, который воздейсвтует на объекты """
     def __init__(self,w = -1,h = -1, min = 0,max = 1,type = 'none'):
         """ Инициализирует слой;"""
         global width, height
+        self.type = "Layer"
         if w == -1:
             w = width
         if h == -1:
@@ -496,24 +523,24 @@ class Layer:
         elif type == 'lines':
             self.layer = [[int(x>y)*(max-min)+min for x in range(w)] for y in range(h)]
 
-    def get_under(self,pos,R,func,*args): #checked 
-        """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
-        _R = int(round(R))
-        dx = int(pos[0])
-        dy = int(pos[1])
-        for x,y in self._get_under[_R-1]:
-            x += dx
-            x %= self.width
-            y += dy
-            y %= self.height
-            func(x,y,*args)
+    # def get_under(self,pos,R,func,*args): #checked 
+    #     """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
+    #     _R = int(round(R))
+    #     dx = int(pos[0])
+    #     dy = int(pos[1])
+    #     for x,y in self._get_under[_R-1]:
+    #         x += dx
+    #         x %= self.width
+    #         y += dy
+    #         y %= self.height
+    #         func(x,y,*args)
 
-    def get_under_summ(self,pos,R):
-        s = [0]
-        def _summ(x,y,s,self):
-            s[0] += self.layer[y][x]
-        self.get_under(pos,R,_summ,s,self)
-        return s[0]
+    # def get_under_summ(self,pos,R):
+    #     s = [0]
+    #     def _summ(x,y,s,self):
+    #         s[0] += self.layer[y][x]
+    #     self.get_under(pos,R,_summ,s,self)
+    #     return s[0]
 
     def _impact_layer(self,layer):
         """ Воздействует на другой слой, в том числе и на себя """
@@ -524,11 +551,28 @@ class Layer:
         for layer in layers:
             self._impact_layer(layer)
 
+class LayerViscosity(Layer):
+    """ Замедляет объекты. Работает по принципу больше скорость -- больше сила трения
+    #FIXME: не замедляет (общий импульс системы и скорость не уменьшаются, если dt > 0.3 """
+    def __init__(self,**args):
+        Layer.__init__(self,max = 0.1, type = 'none', **args)
+        self.type = "Layer Viscosity"
+        self.mu = args.get('mu',0.1) #коэффициент трения FACTOR
+
+    def _impact_layer(self,layer):
+        if layer.__class__ == LayerObjects:
+            for obj in layer.get_objs():
+                #применяет ускорение, замедляет
+                # ds = obj.mass * self.mu
+                # obj._add_accel([- obj.speed[0] * ds, - obj.speed[1] * ds])
+                pass
+
 class LayerObjects(Layer):
     """ Необычный класс, который вмещает в себя всех живых существ и делает вид, что он обычный класс \n
     Содержит в себе, в отличие от обычного класса слоя, не слой WxH, а объекты, которые взаимодействуют со средой"""
     def __init__(self,w = -1,h = -1):
         global width, height
+        self.type = "Layer Objects"
         if w == -1:
             w = width
         if h == -1:
@@ -562,17 +606,6 @@ class LayerObjects(Layer):
         except KeyError:
             return 1
         return 0
-
-    def _impact_self(self,layer):
-        """ Для каждого объекта внутри себя заставляет его обработать слой """
-        for obj in self.get_objs():
-            if obj.status == 2:
-                self.create_obj(obj.create_child())
-                obj._energy *= 0.6 # должно отняться ровно 40% за раз FACTOR
-                obj._change_state()
-            if obj.status == -1:
-                self.delete_obj_by_id(obj._id) # удаляем из списка ВОЗМОЖНОЕ МЕСТО ДЛЯ УТЕЧКИ ПАМЯТИ
-            obj.step(layer)
 
     def _eat(self,obj1,obj2):
         """ Поедание """
@@ -695,27 +728,23 @@ class LayerObjects(Layer):
 
 
     def step(self,layers):
-        for layer in layers:
-            self._impact_self(layer)
         self.collision()
         self.attack()
-
-class LayerViscosity(Layer):
-    """ Замедляет объекты. Работает по принципу больше скорость -- больше сила трения
-    #FIXME: не замедляет (общий импульс системы и скорость не уменьшаются, если dt > 0.3 """
-    def __init__(self,**args):
-        Layer.__init__(self,max = 0.1, type = 'none', **args)
-        self.mu = args.get('mu',0.1) #коэффициент трения FACTOR
-
-    def _impact_obj(self,obj):
-        """ Как слой с замедлениями влияет на объект, зависит от времени """
-        ds = obj.mass * self.mu
-        obj._add_accel([- obj.speed[0] * ds, - obj.speed[1] * ds])
-
-    def _impact_layer(self,layer):
-        if layer.__class__ == LayerObjects:
-            for obj in layer.get_objs():
-                self._impact_obj(obj)
+        # подразумевается:
+        # for layer in layers:
+            # if layer.__class__ == LayerObject:
+        # но так как слои нигде здесь не исполльзуются, то вызывается просто эта штука
+        for obj in self.get_objs():
+            if obj.status == 2:
+                self.create_obj(obj.create_child())
+                obj._energy *= 0.6 # должно отняться ровно 40% за раз FACTOR
+                obj._change_state()
+            elif obj.status == -1:
+                self.delete_obj_by_id(obj._id) # удаляем из списка ВОЗМОЖНОЕ МЕСТО ДЛЯ УТЕЧКИ ПАМЯТИ
+            else:
+                obj.step()
+                obj._change_state()
+                # pass
 
 class Mind:
     """ (Тестовый) Суперкласс разума. На вход подаются данные с датчиков, на выход -- действия """
@@ -794,6 +823,7 @@ class Eyes(Sensor):
         self.focus = self.focus * (1 - dt / 20) + r * dt / 20
 
     def _get_angles(self,param,objects):
+        """ TODO: переделать на обратку """
         sobj = self.obj
         w,h = param
         X,Y = sobj.pos[0].x+w, sobj.pos[0].y+h
@@ -883,7 +913,6 @@ class Object:
         k = dt / self.mass 
 
         self.speed[1] += omega * k / pi / 10 #применяем угловое ускорение FACTOR
-
         self.speed[0] += accel * k # применяем линейную скорости
 
         self._accel = [vect.null(),0]
@@ -928,20 +957,13 @@ class Object:
             self.status = -1
         return self.status
 
-    def _impact_self(self):
+    def step(self):
         """ Шагает"""
         self._move()
 
-    def _impact_layer(self,layer):
-        if layer.__class__ == LayerObjects:
-            self._impact_self()
-
     def create_child(self):
         """ Возвращает ребёнка """
-        pass
-
-    def step(self,layer):
-        self._impact_layer(layer)        
+        pass  
 
     def __str__(self):
         return "Pos: (%3d,%3d;%3.f); Pow: %.2f/%.2f; Sp: [w:%2.4f; a:%3.f om:%3.f] M:%3d [A:%1.4f Str: %1.4f] St: %d" %(self.pos[0].x,self.pos[0].y,(self.pos[1]/pi*180),self._energy,self._max_energy,self.speed[0].r,(self.speed[0].phi/pi*180),(self.speed[1]/pi*180),self.mass,self._attack * self._attack_range * self.get_strong(),self._strong,self.status)
@@ -956,9 +978,12 @@ class ObjectBot(Object):
         accel, omega = usk
         self._add_accel([Vector(accel,self.pos[1],isPolar = True),omega])
 
-    def _impact_self(self):
+    def step(self):
         """ Вызывается, когда Родительский слой воздействует сам на себя """
         global layers
+        
+        pdb.set_trace()
+
         if self.status > 0: # Осторожно! РАБОТА МОЗГА
             state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":self.eyes(layers),"ferromons":(0,0,0,0)}
             ret =  self._mind.step(state)
@@ -973,6 +998,7 @@ class ObjectBot(Object):
             # применение
         else:
             self._attack = 0
+
         self.apply_accel()
         self._move()
 
@@ -982,12 +1008,6 @@ class ObjectBot(Object):
                 self.radius = sqrt(self.mass)
 
         #self._attack = 0 # обнуляем
-
-    def _impact_layer(self,layer):
-        """ Воздействует на слои """
-        if layer.__class__ == LayerObjects:
-            self._impact_self()
-        #---------------#
 
     def create_child(self):
         """ Возвращает ребёнка """
@@ -1010,19 +1030,29 @@ class ObjectBot(Object):
             ,id = 0
             )
 
-    def step(self,layer):
-        """ Вызывает _impact_layer """
-        self._impact_layer(layer)
-
 # ========================== PROGRAMM ============================
 
 def loop_step():
-    global layers
+    global layers,tick
+    lock = False
     while 1:
         print("STEP:test")
         if not layers_lock.locked():
+            if lock:
+                lock = False
+                print("STEP: time fail %.1fms" %((time.time()-tm_l1)*1000))
+            tm1 = time.time()
             print("STEP:step")
             step(layers)
+            tick += 1
+            print('STEP: step on %.1fms' %((time.time()-tm1)*1000))
+        else:
+            if not lock:
+                print("STEP:Lock!")
+                lock = True
+                tm_l1 = time.time()
+
+
 
 def step(layers):
     for layer in layers:
@@ -1038,7 +1068,7 @@ def info():
 def tests(test,layer):
     if test == None:
         # for i in range(random.randint(1,100)):
-        for i in range(50):
+        for i in range(30):
             maxenergy = random.random() + 0.5
             layer.create_obj(ObjectBot(pos = (random.random()*width,random.random()*height,random.random()*2*pi),energy = random.random() * maxenergy,maxenergy = maxenergy,radius = random.random()*2+1))
     elif test == '1':
@@ -1146,7 +1176,7 @@ print("Ok")
 
 ch = []
 tick = 0
-t3 = t2 = t1 = time_.time()
+t3 = t2 = t1 = time.time()
 last_fps = fps = 0
 last_tick = 0
 k_mutation = 0.05
@@ -1163,9 +1193,14 @@ if __name__ == '__main__':
         print("Start screen...")
         step_thread = threading.Thread(target = loop_step)
         step_thread.start()
-        out_thread = threading.Thread(target = ScreenOpenGL(layers,layers_lock))
-        # out_thread.start()
+        screen = ScreenOpenGL(layers,layers_lock)
+        out_thread = threading.Thread(target = screen.run)
+        out_thread.start()
     else:
-        ScreenStandart(step,layers)
+        # ScreenStandart(step,layers)
+        # step_thread = threading.Thread(target = loop_step)
+        # step_thread.start()
+        # out_thread = threading.Thread(target = ScreenStandart(layers,layers_lock))
+        loop_step()
 
     print("Bye!")
