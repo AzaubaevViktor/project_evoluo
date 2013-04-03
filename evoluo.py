@@ -129,6 +129,7 @@ class Screen:
     def _loop(self):
         global tick
         if (self.ch == b'q') or (self.ch == b'\xb1') or (self.ch == 27) or (self.ch == 113):
+            isEnd = True
             self.__del__()
             del(self)
             return 0
@@ -146,7 +147,7 @@ class Screen:
                 self.last_tick = tick
 
                 tm2 = time.time()
-                # print("SCR: copy on %.1fms" % ((tm2-tm1)*1000))
+                print("SCR: copy on %.1fms" % ((tm2-tm1)*1000))
             else:
                 pass
                 # print("DRAW: not change")
@@ -164,15 +165,31 @@ class Screen:
         self.update()
 
         tm2 = time.time()
-        # print("DRAW: on %.1fms" %((tm2-tm1)*1000))
+        print("DRAW: on %.1fms" %((tm2-tm1)*1000))
 
         self.ch = self.getch()
 
         return 1
     
     def _end(self):
-        global tick
+        global tick,info
         print("Ticks: %d" %tick)
+        f = open("test","wt")
+        print("Write info...")
+        self.layers_lock.acquire(1)
+        for tk in info:
+            f.write("%d;%d;%d\n" %(tk,int(info[tk][0]*1000),info[tk][1] ))
+            if tk % 1000 == 0:
+                print("\rComplete:%d/%d" %(tk,tick))
+        # f.write("\n")
+        # for tk in info:
+        #     f.write(str(int(info[tk][0]*1000)) + ";")
+        # f.write("\n")
+        # for tk in info:
+        #     f.write(str(info[tk][1]) + ";")
+        self.layers_lock.release()
+        f.close()
+        # print(info)
 
     def __del__(self):
         """ Деструктор класса """
@@ -563,9 +580,9 @@ class LayerViscosity(Layer):
         if layer.__class__ == LayerObjects:
             for obj in layer.get_objs():
                 #применяет ускорение, замедляет
-                # ds = obj.mass * self.mu
-                # obj._add_accel([- obj.speed[0] * ds, - obj.speed[1] * ds])
-                pass
+                ds = obj.mass * self.mu
+                obj._add_accel([- obj.speed[0] * ds, - obj.speed[1] * ds])
+                # pass
 
 class LayerObjects(Layer):
     """ Необычный класс, который вмещает в себя всех живых существ и делает вид, что он обычный класс \n
@@ -982,7 +999,7 @@ class ObjectBot(Object):
         """ Вызывается, когда Родительский слой воздействует сам на себя """
         global layers
         
-        pdb.set_trace()
+        # pdb.set_trace()
 
         if self.status > 0: # Осторожно! РАБОТА МОЗГА
             state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":self.eyes(layers),"ferromons":(0,0,0,0)}
@@ -1033,22 +1050,31 @@ class ObjectBot(Object):
 # ========================== PROGRAMM ============================
 
 def loop_step():
-    global layers,tick
+    global layers,tick,isEnd
     lock = False
     while 1:
-        print("STEP:test")
+        # print("STEP:test")
+        if isEnd:
+            break
+
         if not layers_lock.locked():
             if lock:
                 lock = False
                 print("STEP: time fail %.1fms" %((time.time()-tm_l1)*1000))
             tm1 = time.time()
-            print("STEP:step")
+            # print("STEP:step")
             step(layers)
+            tm2 = time.time()
+            k_obj = len(layer_obj.get_objs())
+            info.update({tick:[tm2-tm1,k_obj]})
             tick += 1
-            print('STEP: step on %.1fms' %((time.time()-tm1)*1000))
+            if k_obj == 0:
+                isEnd = True
+
+            print('%d: step on %.1fms' %(tick,(tm2-tm1)*1000))
         else:
             if not lock:
-                print("STEP:Lock!")
+                # print("STEP:Lock!")
                 lock = True
                 tm_l1 = time.time()
 
@@ -1137,7 +1163,7 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (0,20,random.random()*2*pi),radius = 5,speed = (0,0,0.1),energy = 0.9,strong = 1,maxenergy = 1))
         layer.create_obj(ObjectBot( pos = (30,20,random.random()*2*pi),radius = 5,speed = (0,0,0),energy = 0.9,strong = 1,maxenergy = 1))
     elif test == '24':
-        for x in range(50):
+        for x in range(30):
             layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 2 + random.random()*2,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const()))
 
 def field_params(real_width,real_height):
@@ -1176,12 +1202,15 @@ print("Ok")
 
 ch = []
 tick = 0
-t3 = t2 = t1 = time.time()
+# t3 = t2 = t1 = time.time()
 last_fps = fps = 0
 last_tick = 0
 k_mutation = 0.05
 Informations = []
 layers_lock = threading.Lock()
+info = {}
+isEnd = False
+
 
 if __name__ == '__main__':
     print("Init Screen and start main loop...")
@@ -1204,3 +1233,4 @@ if __name__ == '__main__':
         loop_step()
 
     print("Bye!")
+
