@@ -818,7 +818,7 @@ class Sensor:
 class Eyes(Sensor):
     def __init__(self,*args1,**args2):
         Sensor.__init__(self,*args1,**args2)
-        self.focus = 50 #оптимальное зрение
+        # self.focus = 50 #оптимальное зрение
 
     def __call__(self,layers):
         self.conversion = self._get_conversion() 
@@ -826,18 +826,18 @@ class Eyes(Sensor):
             if layer.__class__ == LayerObjects:
                 return self._get_angles((layer.width,layer.height),layer.get_objs())
 
-    def _get_conversion(self):
-        f = self.focus
-        def getr(r):
-            # return r / (100*f*(f-100)) * ( (f-50) * r - f * f + 5000 ) + 1 да вы ебанитесь
-            if r > f:
-                return 0.5 * (r-100)/(f-100.)/2.
-            else:
-                return 1. - r/f/2.
-        return getr
+    # def _get_conversion(self):
+    #     f = self.focus
+    #     def getr(r):
+    #         # return r / (100*f*(f-100)) * ( (f-50) * r - f * f + 5000 ) + 1 да вы ебанитесь
+    #         if r > f:
+    #             return 0.5 * (r-100)/(f-100.)/2.
+    #         else:
+    #             return 1. - r/f/2.
+    #     return getr
 
-    def _change_focus(self,r):
-        self.focus = self.focus * (1 - dt / 20) + r * dt / 20
+    # def _change_focus(self,r):
+    #     self.focus = self.focus * (1 - dt / 20) + r * dt / 20
 
     def _get_angles(self,param,objects):
         """ TODO: переделать на обратку """
@@ -865,7 +865,7 @@ class Eyes(Sensor):
                         r[n] = min(r[n],v.r-obj.radius-radius)
                         # write_inf(str(dx)+" "+str(dy)+" %.3f" %v.r)
 
-        self._change_focus(r[3])
+        # self._change_focus(r[3])
 
         # write_inf(str(r)+" %.3f" %self.focus)
 
