@@ -147,7 +147,7 @@ class Screen:
                 self.last_tick = tick
 
                 tm2 = time.time()
-                print("SCR: copy on %.1fms" % ((tm2-tm1)*1000))
+                # print("SCR: copy on %.1fms" % ((tm2-tm1)*1000))
             else:
                 pass
                 # print("DRAW: not change")
@@ -165,7 +165,7 @@ class Screen:
         self.update()
 
         tm2 = time.time()
-        print("DRAW: on %.1fms" %((tm2-tm1)*1000))
+        # print("DRAW: on %.1fms" %((tm2-tm1)*1000))
 
         self.ch = self.getch()
 
@@ -794,15 +794,16 @@ class Mind_const(Mind):
         vis = args.get("vision",[0,0,0,0,0,0,0])
         n = 0
         for x in range(7):
-            if vis[n] < vis[x]:
+            if vis[n][0] < vis[x][0]:
                 n = x
-        if vis[n] < 0.1: # если ничего нет поблизсти
+        if vis[n][0] < 0.1: # если ничего нет поблизсти
             move = self.mvnot # крутимся, если ничего не видим
         else:
-            move = (vis[n],(n-3) * self.angvel ) # подбираемся к жертве
+            move = (vis[n][0] * vis[n][0],(n-3) * self.angvel ) # подбираемся к жертве
         attack = 0
-        if vis[n] > 0.98    :
-            attack = 1
+        if  vis[n][0] > .98:
+            if vis[n][1] > 0:
+                attack = 1
         write_inf(str(self.mvnot)+str(self.angvel))
         return {"move":move, "attack":attack}
 
@@ -821,20 +822,21 @@ class Eyes(Sensor):
         # self.focus = 50 #оптимальное зрение
 
     def __call__(self,layers):
-        self.conversion = self._get_conversion() 
+        # self.conversion = self._get_conversion() 
         for layer in layers:
             if layer.__class__ == LayerObjects:
                 return self._get_angles((layer.width,layer.height),layer.get_objs())
 
     # def _get_conversion(self):
-    #     f = self.focus
-    #     def getr(r):
-    #         # return r / (100*f*(f-100)) * ( (f-50) * r - f * f + 5000 ) + 1 да вы ебанитесь
-    #         if r > f:
-    #             return 0.5 * (r-100)/(f-100.)/2.
-    #         else:
-    #             return 1. - r/f/2.
-    #     return getr
+        # return r/100
+        # f = self.focus
+        # def getr(r):
+            # return r / (100*f*(f-100)) * ( (f-50) * r - f * f + 5000 ) + 1 да вы ебанитесь
+            # if r > f:
+            #     return 0.5 * (r-100)/(f-100.)/2.
+            # else:
+            #     return 1. - r/f/2.
+        # return getr
 
     # def _change_focus(self,r):
     #     self.focus = self.focus * (1 - dt / 20) + r * dt / 20
@@ -852,8 +854,8 @@ class Eyes(Sensor):
                 if (x == 1 == y) or (abs(abs_angl(field_angle[y][x]-sphi)) <= 0.55 * pi): # ~ 105/2 + 45
                     allowed.append([x,y])
 
-        out = [0,0,0,0,0,0,0] # 0 -- за пределами видимости r = 100, 0.5 - в фокусе r = f, 1 -- близко r = 0
-        r = [100,100,100,100,100,100,100] # расстояния
+        # out = [0,0,0,0,0,0,0] # 0 -- за пределами видимости r = 100
+        r = [[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0]] # расстояния + состояние существа
         for (dx,dy) in allowed:
             for obj in objects:
                 if obj != sobj:
@@ -862,14 +864,17 @@ class Eyes(Sensor):
                     if -3 <= n <= 3:
                         n += 3.5 # 0.5 для округления
                         n = int(n)
-                        r[n] = min(r[n],v.r-obj.radius-radius)
+                        if v.r-obj.radius-radius < r[n][0]:
+                            r[n][0] = v.r-obj.radius-radius
+                        r[n][1] = obj._get_lifestate()
                         # write_inf(str(dx)+" "+str(dy)+" %.3f" %v.r)
 
         # self._change_focus(r[3])
 
-        # write_inf(str(r)+" %.3f" %self.focus)
+        # print(str(r)+" %.3f")
 
-        return [self.conversion(a + (a-self.focus) * random.normalvariate(0,0.2) ) for a in r]
+        # return [self.conversion(a + (a-self.focus) * random.normalvariate(0,0.2) ) for a in r]
+        return [(1-a/100,b) for a,b in r]
 
 class Object: 
     """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив"""
@@ -1002,7 +1007,7 @@ class ObjectBot(Object):
         # pdb.set_trace()
 
         if self.status > 0: # Осторожно! РАБОТА МОЗГА
-            state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":self.eyes(layers),"ferromons":(0,0,0,0)}
+            state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":self.eyes(layers),"ferromons":(0,0,0,0),"speed":(self.speed[0].r/10,self.speed[0].phi/2/pi,self.speed[1]/2/pi)}
             ret =  self._mind.step(state)
             #Обработка результатов мозга
             accel = [x for x in ret.get("move",(0,0))]
@@ -1060,7 +1065,7 @@ def loop_step():
         if not layers_lock.locked():
             if lock:
                 lock = False
-                print("STEP: time fail %.1fms" %((time.time()-tm_l1)*1000))
+                # print("STEP: time fail %.1fms" %((time.time()-tm_l1)*1000))
             tm1 = time.time()
             # print("STEP:step")
             step(layers)
@@ -1068,10 +1073,11 @@ def loop_step():
             k_obj = len(layer_obj.get_objs())
             info.update({tick:[tm2-tm1,k_obj]})
             tick += 1
+
             if k_obj == 0:
                 isEnd = True
 
-            print('%d: step on %.1fms' %(tick,(tm2-tm1)*1000))
+            # print('%d: step on %.1fms' %(tick,(tm2-tm1)*1000))
         else:
             if not lock:
                 # print("STEP:Lock!")
@@ -1163,8 +1169,12 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (0,20,random.random()*2*pi),radius = 5,speed = (0,0,0.1),energy = 0.9,strong = 1,maxenergy = 1))
         layer.create_obj(ObjectBot( pos = (30,20,random.random()*2*pi),radius = 5,speed = (0,0,0),energy = 0.9,strong = 1,maxenergy = 1))
     elif test == '24':
-        for x in range(30):
-            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 2 + random.random()*2,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const()))
+        for x in range(5):
+            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 2 + random.random()*2,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
+    elif test == '25':
+        for x in range(5):
+            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 5 + random.random()*2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
+
 
 def field_params(real_width,real_height):
     global width,height,k_screen
