@@ -178,7 +178,7 @@ class Screen:
         print("Write info...")
         self.layers_lock.acquire(1)
         for tk in info:
-            f.write("%d;%d;%d\n" %(tk,int(info[tk][0]*1000),info[tk][1] ))
+            f.write("%d;%d;%d\n" %(tk,info[tk][1],int(info[tk][0]*1000) ))
             if tk % 1000 == 0:
                 print("\rComplete:%d/%d" %(tk,tick))
         # f.write("\n")
@@ -633,11 +633,9 @@ class LayerObjects(Layer):
                 obj2.radius = sqrt(obj2.mass)
             obj1.energy(obj2._max_energy * obj2._strong) #FACTOR добвляем энергии поедающему
 
-    def _collision(self,id1,id2,inside):
+    def _collision(self,obj1,obj2,inside):
         """ Просчитывает скорости объектов
         РАсчёт коэффициента: 1.1"""
-        obj1 = self.get_obj_by_id(id1)
-        obj2 = self.get_obj_by_id(id2)
         if (obj1 != None) and (obj2 != None):
             p1 = obj1.pos[0]
             v1 = obj1.speed[0]
@@ -652,7 +650,7 @@ class LayerObjects(Layer):
 
             # Меняем скорости, если они столкнулись только что
             if (obj1.status > 0) and (obj2.status > 0):
-                if self._colliding[0].count(getpair(id1,id2)) == 0:
+                if self._colliding[0].count(getpair(obj1._id,obj2._id)) == 0:
                     def _get(m1,m2,v1,v2):
                         """ уравнение полученных скоростей, чтобы по 10 раз не писать одно и то же """ 
                         return (v1 * (m1 - m2) + v2 * 2 * m2) / (m1 + m2)
@@ -694,19 +692,6 @@ class LayerObjects(Layer):
             for a,b in [(obj1,obj2),(obj2,obj1)]:
                 self._eat(a,b)
 
-    def collision(self):
-        """ Определяет, сталкиваются ли объекты """
-        _objs = self.get_objs()
-        lenght = len(_objs)
-        for i in range(lenght):
-            for j in range(i+1,lenght):
-                inside = (get_min_distance((self.width,self.height),_objs[i].pos[0],_objs[j].pos[0]) - (_objs[i].radius+_objs[j].radius)) / 2
-                if inside < 0:
-                    self._collision(_objs[i]._id,_objs[j]._id,-inside)
-                    self._colliding[1].append(getpair(_objs[i]._id,_objs[j]._id)) # добавляет сталкивающиеся объекты в новый, чтобы на следующем шаге показать, что они уже сталкивались и надо их посильнее оттолкнуть
-        self._colliding[0] = copy.copy(self._colliding[1])
-        self._colliding[1] = []
-
     def _attack(self,a,b):
         #Расчёт того, насколько глубоко проник удар I.3
         OO = Vector(b.pos[0].x-a.pos[0].x, b.pos[0].y-a.pos[0].y, isPolar = False) # Вектор, соединяющий центры ботов
@@ -731,22 +716,32 @@ class LayerObjects(Layer):
                         return f_at
         return 0
 
-    def attack(self):
+    def _attack_collision(self):
         _objs = self.get_objs()
-        # lenght = len(_objs)
         self._attacked = {}
+        #По тестам -- самый быстрый вариант перебора
+        i = 0
         for a in _objs:
-            for b in _objs:
-                if (a != b):
-                    inside = (get_min_distance((self.width,self.height),a.pos[0],b.pos[0]) - (a.radius+b.radius)) / 2
-                    if inside < a._attack_range:
-                        attack = self._attack(a,b) # Атакует a
-                        self._attacked.update({b._id:attack})
+            i += 1
+            for b in _objs[i:]:
+                inside = (get_min_distance((self.width,self.height),a.pos[0],b.pos[0]) - (a.radius+b.radius)) / 2
+                #collision
+                if inside < 0:
+                    self._collision(a,b,-inside)
+                    self._colliding[1].append(getpair(a._id,b._id)) # добавляет сталкивающиеся объекты в новый, чтобы на следующем шаге показать, что они уже сталкивались и надо их посильнее оттолкнуть
+                #attack
+                if inside < a._attack_range:
+                    attack = self._attack(a,b) # a Атакует b 
+                    self._attacked.update({b._id:attack})
+                    attack = self._attack(b,a) # b Атакует a
+                    self._attacked.update({a._id:attack})
 
+        #collision
+        self._colliding[0] = copy.copy(self._colliding[1])
+        self._colliding[1] = []
 
     def step(self,layers):
-        self.collision()
-        self.attack()
+        self._attack_collision()
         # подразумевается:
         # for layer in layers:
             # if layer.__class__ == LayerObject:
@@ -1068,7 +1063,9 @@ def loop_step():
                 # print("STEP: time fail %.1fms" %((time.time()-tm_l1)*1000))
             tm1 = time.time()
             # print("STEP:step")
+            layers_lock.acquire(1)
             step(layers)
+            layers_lock.release()
             tm2 = time.time()
             k_obj = len(layer_obj.get_objs())
             info.update({tick:[tm2-tm1,k_obj]})
@@ -1169,7 +1166,7 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (0,20,random.random()*2*pi),radius = 5,speed = (0,0,0.1),energy = 0.9,strong = 1,maxenergy = 1))
         layer.create_obj(ObjectBot( pos = (30,20,random.random()*2*pi),radius = 5,speed = (0,0,0),energy = 0.9,strong = 1,maxenergy = 1))
     elif test == '24':
-        for x in range(5):
+        for x in range(50):
             layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 2 + random.random()*2,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
     elif test == '25':
         for x in range(5):
