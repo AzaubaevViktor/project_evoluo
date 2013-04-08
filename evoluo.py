@@ -125,6 +125,7 @@ class Screen:
     def getch(self):
         return 0
     def _draw_prepare(self):
+        """ Копирует из глобальной переменной всё, что ей нужно """
         self._layers = copy.deepcopy(layers)
     def _loop(self):
         global tick
@@ -134,29 +135,17 @@ class Screen:
             del(self)
             return 0
         else:
-            # tick += 1
-            # print("SCR:acquire")
             if self.last_tick != tick:
-                tm1 = time.time()
-
                 self.layers_lock.acquire(1)
-                # print("SCR:copy")
                 self._draw_prepare()
-                # print("SCR:release")
                 self.layers_lock.release()
                 self.last_tick = tick
-
-                tm2 = time.time()
-                # print("SCR: copy on %.1fms" % ((tm2-tm1)*1000))
             else:
                 pass
-                # print("DRAW: not change")
-
+            # рисует сцену
             return self._main()
     def _main(self):
         global tick
-        # print("SCR:draw")
-        tm1 = time.time()
         self.clear()
 
         for layer in self._layers:
@@ -164,13 +153,9 @@ class Screen:
 
         self.update()
 
-        tm2 = time.time()
-        # print("DRAW: on %.1fms" %((tm2-tm1)*1000))
-
         self.ch = self.getch()
 
         return 1
-    
     def _end(self):
         global tick,info
         print("Ticks: %d" %tick)
@@ -180,128 +165,14 @@ class Screen:
         for tk in info:
             f.write("%d;%d;%d\n" %(tk,info[tk][1],int(info[tk][0]*1000) ))
             if tk % 1000 == 0:
-                print("\rComplete:%d/%d" %(tk,tick))
-        # f.write("\n")
-        # for tk in info:
-        #     f.write(str(int(info[tk][0]*1000)) + ";")
-        # f.write("\n")
-        # for tk in info:
-        #     f.write(str(info[tk][1]) + ";")
+                print("Complete:%d/%d\r" %(tk,tick))
         self.layers_lock.release()
         f.close()
-        # print(info)
-
     def __del__(self):
         """ Деструктор класса """
         pass
 
 import curses
-
-class ScreenCursesInfoBackUp(Screen):
-    def __init__(self):
-        Screen.__init__(self,"Curses Screen")
-        self._init_curses()
-
-    def _init_curses(self):
-        print("Init sprites...")
-        self._get_under = _init_get_under_new()
-
-        self._scr = curses.initscr()
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
-        curses.init_pair(2, curses.COLOR_RED, curses.COLOR_WHITE)
-        # curses.noecho()
-        # curses.cbreak()
-        # self._scr.keypad(1)
-        self._scr.clear()
-        # self._scr.nodelay(1)
-        self.height,self.width = self._scr.getmaxyx()
-        self.height -= 1
-        self.wrt_pos = 0
-        self.ch = None
-
-    def line(self,pos,vect,color):
-        def _from(a,b):
-            if a > b:
-                return reversed(range(b,a+1))
-            else:
-                return range(a,b+1)
-        x = [0,0]
-        y = [0,0]
-
-        x[0], y[0] = pos[0], pos[1]
-        x[1], y[1] = vect.x + x[0], vect.y + y[0]
-
-        if abs(y[1] - y[0]) < abs(x[1] - x[0]):
-            for _x in _from(0,int(x[1]-x[0])):
-                if (x[1] - x[0]) != 0:
-                    self.write(
-                        ( int(x[0] + _x), int( y[0] + (y[1]-y[0]) / (x[1]-x[0]) * _x )), '*', curses.color_pair(color)
-                        )
-        else:
-            for _y in _from(0,int(y[1]-y[0])):
-                if (y[1] - y[0]) != 0:
-                    self.write(
-                        ( int( x[0] + (x[1]-x[0]) / (y[1]-y[0]) * _y ), int(y[0] + _y) ), '*', curses.color_pair(color)
-                        )
-        pass
-
-    def get_under(self,pos,R,func,*args): # Удалить
-        """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
-        _R = int(round(R))
-        dx = int(pos[0])
-        dy = int(pos[1])
-        for x,y in self._get_under[_R-1]:
-            x += dx
-            x %= self.width
-            y += dy
-            y %= self.height
-            func(x,y,*args)
-
-    def draw(self,layer):
-        if layer.__class__ == LayerObjects:
-            for obj in layer.get_objs():
-                pos = obj.get_pos_screen()
-                def _wrt(x,y):
-                    self.write((x,y)," ",curses.A_REVERSE)
-                self.get_under(pos,obj.radius * k_screen,_wrt) # Исправить на Layer. ...
-                self.line(
-                    pos,
-                    gamecoord_to_screen(
-                        Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
-                        obj.pos[1],
-                        isPolar = True
-                        )),
-                    2)
-                self.line(pos,obj.speed[0] * k_screen * 3,1)
-                self.write((int(pos[0]),int(pos[1])),"%d" %(obj._get_lifestate()*10),curses.A_REVERSE)
-
-    def update(self):
-        self._scr.refresh()
-
-    def clear(self):
-        for y in range(self.height):
-                self.write((0,y),' ' * self.width)
-        self.wrt_pos = 0
-
-    def write(self,pos,str,*attr):
-        self._scr.addstr(int(pos[1] % self.height),int(pos[0] % self.width),str,*attr)
-
-    def write_inf(self):
-        pass
-
-    def write_ch(self,pos,ch,*attr):
-        self._scr.addch(pos[1],pos[0],ch,*attr)
-
-    def getch(self):
-        return self._scr.getch()
-
-    def __del__(self):
-        # curses.nocbreak()
-        # curses.echo()
-        curses.endwin()
-        # self._scr.keypad(0)
-        # self._scr.nodelayd(1)
 
 class ScreenCursesInfo(Screen):
     def __init__(self):
@@ -430,6 +301,8 @@ class ScreenOpenGL(Screen):
         self.width = Width
         self.height = Height
         self.quad = GLU.gluNewQuadric()
+        GLU.gluQuadricNormals(self.quad, GLU.GLU_SMOOTH)
+        GLU.gluQuadricTexture(self.quad, GL.GL_TRUE)
 
     def _resize(self,Width,Height):
         if Height == 0:
@@ -483,6 +356,15 @@ class ScreenOpenGL(Screen):
             if layer.__class__ == LayerObjects:
                 self._layers.append([layer.type,copy.deepcopy(layer.get_objs()),copy.copy(layer._attacked)])
 
+    def draw_eyes(self,vis,r_max,dphi):
+        for x in range(0,7):
+            GLU.gluPartialDisk(self.quad,
+                1,
+                vis[x][0] * r_max,
+                5,
+                3,
+                - ((x - 3) * 15 + 7.5 + dphi / pi * 180) + 90,
+                15)
 
     def draw(self,layer):
         global width,height
@@ -491,7 +373,7 @@ class ScreenOpenGL(Screen):
             for obj in layer[1]:
                 # pos = obj.get_pos()
                 # write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
-                pos = obj.get_pos_screen()
+                pos = [int(x) for x in obj.get_pos_screen()]
                 # Кружок
                 GL.glLoadIdentity()
                 GL.glTranslatef(pos[0]-1,pos[1]-1,0)
@@ -499,21 +381,32 @@ class ScreenOpenGL(Screen):
                     red = 1
                 else:
                     red = 0
-                GL.glColor3f(red,obj._get_lifestate()*0.9+0.1,1-obj.age/100)
+                GL.glColor3f(red,obj._get_lifestate()*0.9+0.1,1-obj.age/5)
                 GLU.gluDisk(self.quad,0,obj.radius*k_screen,20,1)
+
+                # GLU.gluPartialDisk(self.quad,0,100,30,3,- (obj.pos[1] / pi * 180 + 10) + 90,20)
                 #Стрелочки-направления
                 att = Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
                         obj.pos[1],
                         isPolar = True
                         ) * k_screen
-                speed = obj.speed[0] * k_screen
+                speed = obj.speed[0] * k_screen * 5
+                #Глазки
+                GL.glColor3f(1-red,1-(obj._get_lifestate()*0.9+0.1),obj.age/5)
+                try:
+                    eyes = obj.eyes
+                except NameError:
+                    pass
+                else:
+                    self.draw_eyes(obj.eyes.eyes,obj.radius * k_screen,obj.pos[1])
+                # Полосочки
                 GL.glBegin(GL.GL_LINES)
                 GL.glColor3f(1,0,0)
-                GL.glVertex3f(0,0,-1)
-                GL.glVertex3f(att.x,att.y,-1)
+                GL.glVertex3f(0,0,0)
+                GL.glVertex3f(att.x,att.y,0)
                 GL.glColor3f(0,0,1)
-                GL.glVertex3f(0,0,-0.5)
-                GL.glVertex3f(speed.x,speed.y,-1.100)
+                GL.glVertex3f(0,0,-1)
+                GL.glVertex3f(speed.x,speed.y,-1)
                 GL.glEnd()
                 
         self.infoScreen.draw()
@@ -540,6 +433,7 @@ class Layer:
         elif type == 'lines':
             self.layer = [[int(x>y)*(max-min)+min for x in range(w)] for y in range(h)]
 
+    # ========== Пока не нужно ============
     # def get_under(self,pos,R,func,*args): #checked 
     #     """ Даёт список ссылок на клетки слоя, которые находятся под окружностью радиуса R."""
     #     _R = int(round(R))
@@ -814,6 +708,7 @@ class Sensor:
 class Eyes(Sensor):
     def __init__(self,*args1,**args2):
         Sensor.__init__(self,*args1,**args2)
+        self.eyes = [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
         # self.focus = 50 #оптимальное зрение
 
     def __call__(self,layers):
@@ -821,20 +716,6 @@ class Eyes(Sensor):
         for layer in layers:
             if layer.__class__ == LayerObjects:
                 return self._get_angles((layer.width,layer.height),layer.get_objs())
-
-    # def _get_conversion(self):
-        # return r/100
-        # f = self.focus
-        # def getr(r):
-            # return r / (100*f*(f-100)) * ( (f-50) * r - f * f + 5000 ) + 1 да вы ебанитесь
-            # if r > f:
-            #     return 0.5 * (r-100)/(f-100.)/2.
-            # else:
-            #     return 1. - r/f/2.
-        # return getr
-
-    # def _change_focus(self,r):
-    #     self.focus = self.focus * (1 - dt / 20) + r * dt / 20
 
     def _get_angles(self,param,objects):
         """ TODO: переделать на обратку """
@@ -854,22 +735,23 @@ class Eyes(Sensor):
         for (dx,dy) in allowed:
             for obj in objects:
                 if obj != sobj:
-                    v = Vector( obj.pos[0].x+w*dx - X, obj.pos[0].y+h*dy - Y)
-                    n = abs_angl(v.phi-sphi) / (0.083 * pi) # 15 градусов
-                    if -3 <= n <= 3:
-                        n += 3.5 # 0.5 для округления
-                        n = int(n)
-                        if v.r-obj.radius-radius < r[n][0]:
-                            r[n][0] = v.r-obj.radius-radius
+                    v = Vector( obj.pos[0].x+w*dx - X, obj.pos[0].y+h*dy - Y) # вектор между центрами
+                    distance = v.r
+                    # print(distance)
+                    if distance > 0.001:
+                        dphi = atan(obj.radius/distance) # Радиус 
+                    else:
+                        dphi = pi
+                    n_r = abs_angl(v.phi - sphi + dphi) / (0.083 * pi)
+                    n_l = abs_angl(v.phi - sphi - dphi) / (0.083 * pi)
+
+                    for n in range( int(max(-3,n_l) + 3.5), int(min(3,n_r) + 3.5 + 1) ):
+                        if distance-obj.radius-radius < r[n][0]:
+                            r[n][0] = distance-obj.radius-radius
                         r[n][1] = obj._get_lifestate()
-                        # write_inf(str(dx)+" "+str(dy)+" %.3f" %v.r)
 
-        # self._change_focus(r[3])
-
-        # print(str(r)+" %.3f")
-
-        # return [self.conversion(a + (a-self.focus) * random.normalvariate(0,0.2) ) for a in r]
-        return [(1-a/100,b) for a,b in r]
+        self.eyes = [(1-a/100,b) for a,b in r]
+        return self.eyes
 
 class Object: 
     """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив"""
@@ -910,7 +792,7 @@ class Object:
         self.pos[0].y %= height
 
         # Движение означает, что шаг завершён, поэтому
-        self.age += 1
+        self.age += dt
 
     def get_strong(self):
         """ Возвращает текущую силу, которая зависит от многих параметров. Чем больше максимальная энергия -- тем сильнее организм, поэтому energy/maxenergy * maxenergy = energy """
@@ -1067,9 +949,11 @@ def loop_step():
             step(layers)
             layers_lock.release()
             tm2 = time.time()
+            tick += 1
+
             k_obj = len(layer_obj.get_objs())
             info.update({tick:[tm2-tm1,k_obj]})
-            tick += 1
+
 
             if k_obj == 0:
                 isEnd = True
@@ -1087,12 +971,12 @@ def step(layers):
     for layer in layers:
         layer.step(layers)
 
-def info():
-    h = height - len(layer_obj._objs) - 2
-    for obj in layer_obj._objs:
-        write_inf(str(obj)+' ')
-        h += 1
-    write_int('tick: %d; time: %.2f; half fps: %.2f; last fps: %.2f' % (tick,t2-t1,fps,last_fpc))
+# def info():
+#     h = height - len(layer_obj._objs) - 2
+#     for obj in layer_obj._objs:
+#         write_inf(str(obj)+' ')
+#         h += 1
+#     write_int('tick: %d; time: %.2f; half fps: %.2f; last fps: %.2f' % (tick,t2-t1,fps,last_fpc))
 
 def tests(test,layer):
     if test == None:
