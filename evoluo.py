@@ -54,14 +54,14 @@ def get_min_distance(param,p1,p2): #проверена
 def write_info_into_file():
     global tick,info
     print("Ticks: %d" %tick)
-    f = open("test.csv","wt")
+    f = open("logs/test.csv","wt")
     print("Write info...")
-    f.write("ID;Родился;Умер;Радиус;Поиск_r;Поиск_phi;Ускорение поворота к жертве;Корректировка относительно скорости;Мощь\n")
+    f.write("ID;Родился;Умер;Кол-во;Радиус;Поиск_r;Поиск_phi;Ускорение поворота к жертве;Корректировка относительно скорости;МинRАтак;Мощь\n")
     for _id in info:
         inf = info[_id]
         # f.write( "%.3f;%d;%.3f;%.3f;%.3f;%.3f;%3f;\n"  %(inf['tick'],inf['k_obj'],inf['m_radius'],inf['m_mvnot0'],inf['m_mvnot1'],inf['m_angvel'],inf['m_correct']) )
         # f.write("%d;%d;%d\n" %(tk,info[tk][1],int(info[tk][0]*1000) ))
-        f.write("%d;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f\n" %(_id,inf['born'],inf['die'],inf['radius'],inf['mvnot0'],inf['mvnot1'],inf['angvel'],inf['correct'],inf['strong']) )
+        f.write("%d;%.3f;%.3f;%d;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f\n" %(_id,inf['born'],inf['die'],inf['k_obj'],inf['radius'],inf['mvnot0'],inf['mvnot1'],inf['angvel'],inf['correct'],inf['att_rate'],inf['strong']) )
         if _id % 50:
             print("Complete:%d" %(_id))
     f.close()
@@ -220,7 +220,7 @@ class ScreenStandart(Screen):
     def __init__(self,loop_func,layers):
         Screen.__init__(self,"Standart Screen",loop_func,layers)
         global tick
-        while len(layer_obj.get_objs()) != 0:
+        while layer_obj.get_k_objs() != 0:
         # for tick in range(1,1000):
             self._loop()
 
@@ -336,48 +336,59 @@ class ScreenOpenGL(Screen):
                 - ((x - 3) * 15 + 7.5 + dphi / pi * 180) + 90,
                 15)
 
+    def draw_obj(self,obj,_id,pos,circle,lines,attacked):
+        # Кружок
+        GL.glLoadIdentity()
+        GL.glTranslatef(pos[0]-1,pos[1]-1,0)
+        if attacked.get(_id,0) > 0:
+            red = 1
+        else:
+            red = 0
+        GL.glColor3f(red,obj._get_lifestate()*0.9+0.1,1-obj.age/5)
+        GLU.gluDisk(self.quad,*circle)
+
+        #Глазки
+        GL.glColor3f(1-red,1-(obj._get_lifestate()*0.9+0.1),obj.age/5)
+        try:
+            eyes = obj.eyes
+        except NameError:
+            pass
+        else:
+            self.draw_eyes(obj.eyes.eyes,obj.radius * k_screen,obj.pos[1])
+        # Полосочки
+        GL.glBegin(GL.GL_LINES)
+        for color,x,y in lines:
+            GL.glColor3f(*color)
+            GL.glVertex3f(0,0,0)
+            GL.glVertex3f(x,y,0)
+        GL.glEnd()
+
     def draw(self,layer):
         global width,height
         if layer[0] == "Layer Objects":
             attacked = layer[2]
             for obj in layer[1]:
-                # pos = obj.get_pos()
-                # write_inf("%7d:[%4.1f;%4.1f].L:%.2f/%.2f" %(obj._id,pos[0],pos[1],obj._energy,obj._max_energy))
-                pos = [int(x) for x in obj.get_pos_screen()]
-                # Кружок
-                GL.glLoadIdentity()
-                GL.glTranslatef(pos[0]-1,pos[1]-1,0)
-                if attacked.get(obj._id,0) > 0:
-                    red = 1
-                else:
-                    red = 0
-                GL.glColor3f(red,obj._get_lifestate()*0.9+0.1,1-obj.age/5)
-                GLU.gluDisk(self.quad,0,obj.radius*k_screen,20,1)
-
-                # GLU.gluPartialDisk(self.quad,0,100,30,3,- (obj.pos[1] / pi * 180 + 10) + 90,20)
                 #Стрелочки-направления
-                att = Vector(obj.radius+obj._attack_range*obj._attack*obj.radius,
+                pos = [int(x) for x in obj.get_pos_screen()]
+                positions = [pos,]
+                radius_scr = obj.radius * k_screen
+                att = Vector(radius_scr * (1 +obj._attack_range*obj._attack),
                         obj.pos[1],
                         isPolar = True
-                        ) * k_screen
+                        ) 
                 speed = obj.speed[0] * k_screen * 5
-                #Глазки
-                GL.glColor3f(1-red,1-(obj._get_lifestate()*0.9+0.1),obj.age/5)
-                try:
-                    eyes = obj.eyes
-                except NameError:
-                    pass
-                else:
-                    self.draw_eyes(obj.eyes.eyes,obj.radius * k_screen,obj.pos[1])
-                # Полосочки
-                GL.glBegin(GL.GL_LINES)
-                GL.glColor3f(1,0,0)
-                GL.glVertex3f(0,0,0)
-                GL.glVertex3f(att.x,att.y,0)
-                GL.glColor3f(0,0,1)
-                GL.glVertex3f(0,0,-1)
-                GL.glVertex3f(speed.x,speed.y,-1)
-                GL.glEnd()
+
+                if pos[0] < radius_scr:
+                    positions.append([pos[0] + self.width,pos[1]])
+                if pos[0] + radius_scr > self.width:
+                    positions.append([pos[0] - self.width,pos[1]])
+                if pos[1] < radius_scr:
+                    positions.append([pos[0],pos[1] + self.height])
+                if pos[1] + radius_scr > self.height:
+                    positions.append([pos[0],pos[1] - self.height])
+
+                for ps in positions:
+                    self.draw_obj(obj,obj._id, ps , [0,obj.radius*k_screen,20,1], [ [ (1,0,0) , att.x, att.y ], [ (0,0,1) , speed.x, speed.y] ] , attacked)
                 
         self.infoScreen.draw()
 
@@ -464,6 +475,8 @@ class LayerObjects(Layer):
         self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
         self._attacked = {}
         self.last_id = 0
+        self.k_obj = 0
+
     def _generate_id(self):
         """ Генерирует уникальный id. В будущем переделать """
         self.last_id += 1
@@ -472,6 +485,7 @@ class LayerObjects(Layer):
 
     def create_obj(self,obj):
         """ Создаёт объект """
+        self.k_obj += 1
         obj._id = self._generate_id()
         self._objs.update({obj._id:obj})
         add_info(obj,"born")
@@ -480,12 +494,16 @@ class LayerObjects(Layer):
         """ Возвращает список объектов """
         return list(self._objs.values())
 
+    def get_k_objs(self):
+        return self.k_obj
+
     def get_obj_by_id(self,id):
         """ Возвращает объект по id """
         return self._objs.get(id,None)
 
     def delete_obj_by_id(self,id):
         """ Удаляет объект по id """
+        self.k_obj -= 1 # помечает, что кол-во объектов изменилось
         add_info(self.get_obj_by_id(id),"die")        
         try:
             self._objs.pop(id)
@@ -500,7 +518,8 @@ class LayerObjects(Layer):
             obj2.mass -= 1 * dt # За один тик убавляется 1 жизнь
             if obj2._change_state() != -1:
                 obj2.radius = sqrt(obj2.mass)
-            obj1.energy(obj2._max_energy * obj2._strong / 1.5) #FACTOR добвляем энергии поедающему
+            # tick
+            obj1.energy(obj2._max_energy * obj2._strong) #FACTOR добвляем энергии поедающему
 
     def _collision(self,obj1,obj2,inside):
         """ Просчитывает скорости объектов
@@ -648,12 +667,14 @@ class Mind_const(Mind):
         self.mvnot = init.get("mvnot",(random.random()*2 - 1,random.random()*2 - 1))
         self.angvel = init.get("angvel",random.random()*2 - 1)
         self.correct = init.get("correct",random.random()*2 - 1)
+        self.att_rate = init.get("att_rate",random.random())
 
     def create_child(self):
         return Mind_const(
             mvnot = ( get_mutation(self.mvnot[0]), get_mutation(self.mvnot[1]) ),
             angvel = get_mutation(self.angvel),
-            correct = get_mutation(self.correct)
+            correct = get_mutation(self.correct),
+            att_rate = get_mutation(self.att_rate)
             )
 
     def step(self,args):
@@ -668,8 +689,8 @@ class Mind_const(Mind):
         else:
             move = (vis[n][0] * vis[n][0],(n-3) * self.angvel - omega * self.correct ) # подбираемся к жертве
         attack = 0
-        if  vis[n][0] > .98:
-            if vis[n][1] > 0:
+        if vis[n][0] > self.att_rate:
+            if vis[n][1]:
                 attack = 1
         write_inf(str(self.mvnot)+str(self.angvel))
         return {"move":move, "attack":attack}
@@ -912,6 +933,7 @@ class ObjectBot(Object):
 def add_info(obj,type):
     # global layers_lock
     # layers_lock.acquire(1)
+    k_obj = layer_obj.get_k_objs()
     if type == "born":
         _info = {}
         _info['born'] = tick * dt
@@ -921,12 +943,14 @@ def add_info(obj,type):
         _info['angvel'] = obj._mind.angvel
         _info['correct']= obj._mind.correct
         _info['strong'] = obj.get_strong()
+        _info['att_rate'] = obj._mind.att_rate
+        _info['k_obj'] = k_obj
         _info['die'] = 0
-        info.update({obj._id: _info  })
-        print(type+". K:%d" %len(layer_obj.get_objs()))
+        info.update({obj._id: _info })
+        print(type+". K:%d" %k_obj)
     if type == "die":
         info[obj._id]['die'] = tick * dt
-        print(type+". K:%d" %len(layer_obj.get_objs()))
+        print(type+". K:%d" %k_obj)
 
     # layers_lock.release()
     pass
@@ -951,7 +975,7 @@ def loop_step():
             layers_lock.release()
             tm2 = time.time()
             
-            k_obj = len(layer_obj.get_objs())
+            k_obj = layer_obj.get_k_objs()
 
             if k_obj == 0:
                 isEnd = True
@@ -1052,10 +1076,14 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (30,20,random.random()*2*pi),radius = 5,speed = (0,0,0),energy = 0.9,strong = 1,maxenergy = 1))
     elif test == '24':
         for x in range(50):
-            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 2 + random.random()*2,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
+            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 1 + random.random()*5,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
     elif test == '25':
         for x in range(5):
             layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 5 + random.random()*2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1,mind = Mind_const()))
+    elif test == '26':
+        """ Подкорректированные мозги """
+        for x in range(5):
+            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 5 + random.random()*2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1,mind = Mind_const( mvnot = (0.6,0.75), angvel = 0.05, correct = -0.5 )))
 
 
 def field_params(real_width,real_height):
@@ -1096,7 +1124,7 @@ tick = 0
 # t3 = t2 = t1 = time.time()
 last_fps = fps = 0
 last_tick = 0
-k_mutation = 0.05
+k_mutation = 0.13
 Informations = []
 layers_lock = threading.Lock()
 info = {}
