@@ -121,18 +121,14 @@ class Screen:
                 self._draw_prepare()
                 self.layers_lock.release()
                 self.last_tick = tick
-            else:
-                pass
-            # рисует сцену
-            if self._is_draw:
-                return self._main()
-            else:
-                return 0
+        # рисует сцену
+        return self._main()
     def _main(self):
         global tick
         self.clear()
-        for layer in self._layers:
-            self.draw(layer)
+        if self._is_draw:
+            for layer in self._layers:
+                self.draw(layer)
         self.update()
         self.ch = self.getch()
         return 1
@@ -313,12 +309,15 @@ class ScreenOpenGL(Screen):
 
     def getch(self):
         if self.keypress != []:
-            return self.keypress.pop(-1)[0]    
+            # print
+            return self.keypress.pop(-1)[0]
+        else:
+            return None
 
     def _keyPressed(self,*args):
         if args != None:
             self.keypress.append(args)
-            print(args)
+            print(self.keypress)
 
     def _draw_prepare(self):
         del(self._layers)
