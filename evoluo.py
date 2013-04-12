@@ -51,44 +51,21 @@ def get_min_distance(param,p1,p2): #проверена
     return _r(dx + trunc(-dx / (0.5*param[0])) * param[0]
         ,dy + trunc(-dy / (0.5*param[1])) * param[1])
 
-def get_distribution(param,f0):
-    """ Возвращает функцию с распределением таким, что при deep = 0 и dx = w/2 dy = h/2 даёт 0.1, а при r = 0 даёт 1, формула 1/(x^alpha+1).
-    Является генератором функций.
-    Пока особо не нужна, но понадобится при создании солнечного света"""
-    r = (param[0] ** 2 + param[1] ** 2) ** 0.5
-    alpha = log(1/f0-1)/log(r)
-    def _dist(x):
-        return 1/(x ** alpha + 1)
-    return _dist
-
-def write_arr(arr):
-    for a in arr:
-        print(end='[')
-        for el in a:
-            print("%.2f" %el,end=', ')
-        print(']')
-
-def _init_get_under_new():
-    maxR = round(min(real_width/2,real_height/2))
-    _get_under = [[] for r in range(maxR)]
-    v_0 = Vector(0,0)
-    for R in range(1,maxR+1):
-        _quart = []
-        for x in range(1,R+1):
-            for y in range(1,R+1):
-                if (x + y >= R):
-                    if get_min_distance((real_width,real_height),Vector(x,y),v_0) <= R:
-                        _quart.append([x,y])
-                else:
-                    _quart.append([x,y])
-
-        _get_under[R-1] = (_quart
-                        + [[-x,y] for x,y in _quart]
-                        + [[x,-y] for x,y in _quart]
-                        + [[-x,-y] for x,y in _quart]
-                        + [[x,0] for x in range(-R,R+1)]
-                        + [[0,y] for y in range(-R,R+1) if y != 0])
-    return _get_under
+def write_info_into_file():
+    global tick,info
+    print("Ticks: %d" %tick)
+    f = open("test.csv","wt")
+    print("Write info...")
+    f.write("ID;Родился;Умер;Радиус;Поиск_r;Поиск_phi;Ускорение поворота к жертве;Корректировка относительно скорости;Мощь\n")
+    for _id in info:
+        inf = info[_id]
+        # f.write( "%.3f;%d;%.3f;%.3f;%.3f;%.3f;%3f;\n"  %(inf['tick'],inf['k_obj'],inf['m_radius'],inf['m_mvnot0'],inf['m_mvnot1'],inf['m_angvel'],inf['m_correct']) )
+        # f.write("%d;%d;%d\n" %(tk,info[tk][1],int(info[tk][0]*1000) ))
+        f.write("%d;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f\n" %(_id,inf['born'],inf['die'],inf['radius'],inf['mvnot0'],inf['mvnot1'],inf['angvel'],inf['correct'],inf['strong']) )
+        if _id % 50:
+            print("Complete:%d" %(_id))
+    f.close()
+    print('closed')
 
 class Screen:
     """ Суперкласс экрана. Служит основой для других классов """
@@ -102,6 +79,7 @@ class Screen:
         self._layers = None
         self.last_tick = -1
         self.ch = b'\0'
+        self._is_draw = True
         pass
     def draw(self,layer):
         """ Расует слой """
@@ -134,8 +112,11 @@ class Screen:
             self.__del__()
             del(self)
             return 0
+        elif (self.ch == b's'):
+            self._is_draw = not self._is_draw
+            print("changed to %d" %self._is_draw)
         else:
-            if self.last_tick != tick:
+            if (self.last_tick != tick) and (self._is_draw):
                 self.layers_lock.acquire(1)
                 self._draw_prepare()
                 self.layers_lock.release()
@@ -143,36 +124,25 @@ class Screen:
             else:
                 pass
             # рисует сцену
-            return self._main()
+            if self._is_draw:
+                return self._main()
+            else:
+                return 0
     def _main(self):
         global tick
         self.clear()
-
         for layer in self._layers:
             self.draw(layer)
-
         self.update()
-
         self.ch = self.getch()
-
         return 1
     def _end(self):
-        global tick,info
-        print("Ticks: %d" %tick)
-        f = open("test","wt")
-        print("Write info...")
         self.layers_lock.acquire(1)
-        for tk in info:
-            f.write("%d;%d;%d\n" %(tk,info[tk][1],int(info[tk][0]*1000) ))
-            if tk % 1000 == 0:
-                print("Complete:%d/%d\r" %(tk,tick))
+        write_info_into_file()
         self.layers_lock.release()
-        f.close()
     def __del__(self):
         """ Деструктор класса """
         pass
-
-import curses
 
 class ScreenCursesInfo(Screen):
     def __init__(self):
@@ -180,8 +150,6 @@ class ScreenCursesInfo(Screen):
         self._init_curses()
 
     def _init_curses(self):
-        # print("Init sprites...")
-        # self._get_under = _init_get_under_new()
         self._scr = curses.initscr()
         curses.start_color()
         curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_WHITE)
@@ -256,7 +224,8 @@ class ScreenStandart(Screen):
     def __init__(self,loop_func,layers):
         Screen.__init__(self,"Standart Screen",loop_func,layers)
         global tick
-        for tick in range(1,1000):
+        while len(layer_obj.get_objs()) != 0:
+        # for tick in range(1,1000):
             self._loop()
 
 class ScreenOpenGL(Screen):
@@ -266,7 +235,7 @@ class ScreenOpenGL(Screen):
 
         self.window = 0
         self.quad = None
-        self.ch = []
+        self.keypress = []
 
         print("Fuck")
         # self.infoScreen = ScreenCursesInfo()
@@ -285,6 +254,7 @@ class ScreenOpenGL(Screen):
         print("Fuck")
 
     def run(self):
+        # для threading
         GLUT.glutMainLoop()
         
     def _initGL(self,Width,Height):
@@ -320,9 +290,10 @@ class ScreenOpenGL(Screen):
         GL.glMatrixMode(GL.GL_MODELVIEW)                   # Select The Modelview Matrix
         GL.glLoadIdentity()
 
-        write_inf(width,height)
-        write_inf(Width,Height)
-        write_inf(k_screen)
+        # print("%dx%d, %.2fx%.2f, %.2f" % (width,height,Width,Height,k_screen))
+        # write_inf(width,height)
+        # write_inf(Width,Height)
+        # write_inf(k_screen)
 
     def update(self):
         GLUT.glutSwapBuffers()
@@ -341,12 +312,12 @@ class ScreenOpenGL(Screen):
         # sys.exit()
 
     def getch(self):
-        if ch != []:
-            return ch.pop(-1)[0]    
+        if self.keypress != []:
+            return self.keypress.pop(-1)[0]    
 
     def _keyPressed(self,*args):
         if args != None:
-            ch.append(args)
+            self.keypress.append(args)
             print(args)
 
     def _draw_prepare(self):
@@ -493,14 +464,18 @@ class LayerObjects(Layer):
         self._objs = {}
         self._colliding = [[],[]] #сталкивающиеся объекты на данный момент (которые были в прошлый ход, которые сейчас)
         self._attacked = {}
+        self.last_id = 0
     def _generate_id(self):
         """ Генерирует уникальный id. В будущем переделать """
-        return random.randint(0,10000000)
+        self.last_id += 1
+        return self.last_id
+        # return random.randint(0,10000000)
 
     def create_obj(self,obj):
         """ Создаёт объект """
         obj._id = self._generate_id()
         self._objs.update({obj._id:obj})
+        add_info(obj,"born")
 
     def get_objs(self):
         """ Возвращает список объектов """
@@ -512,6 +487,7 @@ class LayerObjects(Layer):
 
     def delete_obj_by_id(self,id):
         """ Удаляет объект по id """
+        add_info(self.get_obj_by_id(id),"die")        
         try:
             self._objs.pop(id)
         except KeyError:
@@ -525,7 +501,7 @@ class LayerObjects(Layer):
             obj2.mass -= 1 * dt # За один тик убавляется 1 жизнь
             if obj2._change_state() != -1:
                 obj2.radius = sqrt(obj2.mass)
-            obj1.energy(obj2._max_energy * obj2._strong) #FACTOR добвляем энергии поедающему
+            obj1.energy(obj2._max_energy * obj2._strong / 1.5) #FACTOR добвляем энергии поедающему
 
     def _collision(self,obj1,obj2,inside):
         """ Просчитывает скорости объектов
@@ -670,17 +646,20 @@ class Mind:
 
 class Mind_const(Mind):
     def __init__(self,**init):
-        self.mvnot = init.get("mvnot",(0.05,0.001))
-        self.angvel = init.get("angvel",0.05)
+        self.mvnot = init.get("mvnot",(random.random()*2 - 1,random.random()*2 - 1))
+        self.angvel = init.get("angvel",random.random()*2 - 1)
+        self.correct = init.get("correct",random.random()*2 - 1)
 
     def create_child(self):
         return Mind_const(
             mvnot = ( get_mutation(self.mvnot[0]), get_mutation(self.mvnot[1]) ),
-            angvel = get_mutation(self.angvel)
+            angvel = get_mutation(self.angvel),
+            correct = get_mutation(self.correct)
             )
 
     def step(self,args):
-        vis = args.get("vision",[0,0,0,0,0,0,0])
+        vis = args.get("vision",(0,0,0,0,0,0,0))
+        r,phi,omega = args.get("speed",(0,0,0))
         n = 0
         for x in range(7):
             if vis[n][0] < vis[x][0]:
@@ -688,7 +667,7 @@ class Mind_const(Mind):
         if vis[n][0] < 0.1: # если ничего нет поблизсти
             move = self.mvnot # крутимся, если ничего не видим
         else:
-            move = (vis[n][0] * vis[n][0],(n-3) * self.angvel ) # подбираемся к жертве
+            move = (vis[n][0] * vis[n][0],(n-3) * self.angvel - omega * self.correct ) # подбираемся к жертве
         attack = 0
         if  vis[n][0] > .98:
             if vis[n][1] > 0:
@@ -931,8 +910,31 @@ class ObjectBot(Object):
 
 # ========================== PROGRAMM ============================
 
+def add_info(obj,type):
+    # global layers_lock
+    # layers_lock.acquire(1)
+    if type == "born":
+        _info = {}
+        _info['born'] = tick * dt
+        _info['radius'] = obj.radius
+        _info['mvnot0'] = obj._mind.mvnot[0]
+        _info['mvnot1'] = obj._mind.mvnot[1]
+        _info['angvel'] = obj._mind.angvel
+        _info['correct']= obj._mind.correct
+        _info['strong'] = obj.get_strong()
+        _info['die'] = 0
+        info.update({obj._id: _info  })
+        print(type+". K:%d" %len(layer_obj.get_objs()))
+    if type == "die":
+        info[obj._id]['die'] = tick * dt
+        print(type+". K:%d" %len(layer_obj.get_objs()))
+
+    # layers_lock.release()
+    pass
+    
+
 def loop_step():
-    global layers,tick,isEnd
+    global layers,tick,isEnd,update_info
     lock = False
     while 1:
         # print("STEP:test")
@@ -949,15 +951,15 @@ def loop_step():
             step(layers)
             layers_lock.release()
             tm2 = time.time()
-            tick += 1
-
+            
             k_obj = len(layer_obj.get_objs())
-            info.update({tick:[tm2-tm1,k_obj]})
-
 
             if k_obj == 0:
                 isEnd = True
 
+            tick += 1
+            # if tick > 1000:
+                # isEnd = True
             # print('%d: step on %.1fms' %(tick,(tm2-tm1)*1000))
         else:
             if not lock:
@@ -1054,7 +1056,7 @@ def tests(test,layer):
             layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 2 + random.random()*2,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
     elif test == '25':
         for x in range(5):
-            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 5 + random.random()*2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
+            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 5 + random.random()*2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1,mind = Mind_const()))
 
 
 def field_params(real_width,real_height):
@@ -1086,7 +1088,6 @@ print("Layers:")
 layer_viscosity = LayerViscosity()
 print("Viscosity")
 layer_obj = LayerObjects()
-tests(args.test,layer_obj)
 print("Object")
 layers = [layer_viscosity,layer_obj] # layer_obj должен быть всегда в конце, что бы объекты двигались, когда они уже 
 print("Ok")
@@ -1102,14 +1103,15 @@ layers_lock = threading.Lock()
 info = {}
 isEnd = False
 
+tests(args.test,layer_obj)
 
 if __name__ == '__main__':
     print("Init Screen and start main loop...")
 
-    if args.screen == 'curses':
-        print("Start screen...")
-        ScreenCursesOut (step,layers)
-    elif args.screen == 'opengl':
+    # if args.screen == 'curses':
+    #     print("Start screen...")
+    #     ScreenCursesOut (step,layers)
+    if args.screen == 'opengl':
         print("Start screen...")
         step_thread = threading.Thread(target = loop_step)
         step_thread.start()
@@ -1121,7 +1123,10 @@ if __name__ == '__main__':
         # step_thread = threading.Thread(target = loop_step)
         # step_thread.start()
         # out_thread = threading.Thread(target = ScreenStandart(layers,layers_lock))
-        loop_step()
+        # loop_step()
+        screen = ScreenStandart(layers,layers_lock)
+        screen._end()
+        # screen.run()
 
     print("Bye!")
 
