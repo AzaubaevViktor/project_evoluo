@@ -11,6 +11,8 @@ from math import sqrt,trunc,log,pi,sin,cos,tan,acos,asin,atan
 import time
 import vect
 from vect import Vector
+import OpenGL
+OpenGL.ERROR_CHECKING = False
 import OpenGL.GL as GL
 import OpenGL.GLUT as GLUT
 import OpenGL.GLU as GLU
@@ -50,22 +52,6 @@ def get_min_distance(param,p1,p2): #проверена
     dy = p1.y - p2.y
     return _r(dx + trunc(-dx / (0.5*param[0])) * param[0]
         ,dy + trunc(-dy / (0.5*param[1])) * param[1])
-
-def write_info_into_file():
-    global tick,info
-    print("Ticks: %d" %tick)
-    f = open("logs/test.csv","wt")
-    print("Write info...")
-    f.write("ID;Родился;Умер;Кол-во;Радиус;Поиск_r;Поиск_phi;Ускорение поворота к жертве;Корректировка относительно скорости;МинRАтак;Мощь\n")
-    for _id in info:
-        inf = info[_id]
-        # f.write( "%.3f;%d;%.3f;%.3f;%.3f;%.3f;%3f;\n"  %(inf['tick'],inf['k_obj'],inf['m_radius'],inf['m_mvnot0'],inf['m_mvnot1'],inf['m_angvel'],inf['m_correct']) )
-        # f.write("%d;%d;%d\n" %(tk,info[tk][1],int(info[tk][0]*1000) ))
-        f.write("%d;%.3f;%.3f;%d;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f\n" %(_id,inf['born'],inf['die'],inf['k_obj'],inf['radius'],inf['mvnot0'],inf['mvnot1'],inf['angvel'],inf['correct'],inf['att_rate'],inf['strong']) )
-        if _id % 50:
-            print("Complete:%d" %(_id))
-    f.close()
-    print('closed')
 
 class Screen:
     """ Суперкласс экрана. Служит основой для других классов """
@@ -286,11 +272,6 @@ class ScreenOpenGL(Screen):
         GL.glMatrixMode(GL.GL_MODELVIEW)                   # Select The Modelview Matrix
         GL.glLoadIdentity()
 
-        # print("%dx%d, %.2fx%.2f, %.2f" % (width,height,Width,Height,k_screen))
-        # write_inf(width,height)
-        # write_inf(Width,Height)
-        # write_inf(k_screen)
-
     def update(self):
         GLUT.glutSwapBuffers()
 
@@ -336,25 +317,41 @@ class ScreenOpenGL(Screen):
                 - ((x - 3) * 15 + 7.5 + dphi / pi * 180) + 90,
                 15)
 
+    def draw_sensitivity(self,sens,r_max,dphi):
+        for x in range(0,5):
+            GLU.gluPartialDisk(self.quad,
+                1,
+                sens[x] * r_max,
+                5,
+                3,
+                - (52.5 + (x+1) * 51 + dphi / pi * 180) + 90,
+                51)   
+        pass
+
     def draw_obj(self,obj,_id,pos,circle,lines,attacked):
         # Кружок
         GL.glLoadIdentity()
         GL.glTranslatef(pos[0]-1,pos[1]-1,0)
-        if attacked.get(_id,0) > 0:
-            red = 1
-        else:
-            red = 0
-        GL.glColor3f(red,obj._get_lifestate()*0.9+0.1,1-obj.age/5)
+        red,green,blue = obj.color # берём цвет
+        GL.glColor3f(red,green,blue)
         GLU.gluDisk(self.quad,*circle)
 
         #Глазки
-        GL.glColor3f(1-red,1-(obj._get_lifestate()*0.9+0.1),obj.age/5)
+        GL.glColor3f(1-red,1-green,1-blue)
         try:
             eyes = obj.eyes
         except NameError:
             pass
         else:
             self.draw_eyes(obj.eyes.eyes,obj.radius * k_screen,obj.pos[1])
+        # Прикосновения
+        GL.glColor3f(1,0,0)
+        try:
+            sensitivity = obj.sensitivity
+        except NameError:
+            pass
+        else:
+            self.draw_sensitivity(obj.sensitivity._sens,obj.radius * k_screen,obj.pos[1])
         # Полосочки
         GL.glBegin(GL.GL_LINES)
         for color,x,y in lines:
@@ -519,7 +516,11 @@ class LayerObjects(Layer):
             if obj2._change_state() != -1:
                 obj2.radius = sqrt(obj2.mass)
             # tick
-            obj1.energy(obj2._max_energy * obj2._strong) #FACTOR добвляем энергии поедающему
+            n = 20
+            f = lambda x: x/200 + 0.9 
+            obj1.energy(obj2._max_energy * obj2._strong / f(self.k_obj)) #FACTOR добвляем энергии поедающему
+
+    # def distance
 
     def _collision(self,obj1,obj2,inside):
         """ Просчитывает скорости объектов
@@ -535,6 +536,21 @@ class LayerObjects(Layer):
             m2 = obj2.mass
             #получаем вектор-прямую, на которую будут откладываться взаимодействующие вектора
             phi = Vector(p2.x - p1.x, p2.y - p1.y,isPolar = False).phi #угол линии с OX, соединяющий центры
+
+            # заполняем sensitivity
+            try:
+                obj1.sensitivity.add
+            except NameError:
+                pass
+            else:
+                obj1.sensitivity.add(phi)
+
+            try:
+                obj2.sensitivity.add
+            except NameError:
+                pass
+            else:
+                obj2.sensitivity.add(phi-pi)
 
             # Меняем скорости, если они столкнулись только что
             if (obj1.status > 0) and (obj2.status > 0):
@@ -606,7 +622,6 @@ class LayerObjects(Layer):
 
     def _attack_collision(self):
         _objs = self.get_objs()
-        self._attacked = {}
         #По тестам -- самый быстрый вариант перебора
         i = 0
         for a in _objs:
@@ -620,9 +635,7 @@ class LayerObjects(Layer):
                 #attack
                 if inside < a._attack_range:
                     attack = self._attack(a,b) # a Атакует b 
-                    self._attacked.update({b._id:attack})
                     attack = self._attack(b,a) # b Атакует a
-                    self._attacked.update({a._id:attack})
 
         #collision
         self._colliding[0] = copy.copy(self._colliding[1])
@@ -680,6 +693,8 @@ class Mind_const(Mind):
     def step(self,args):
         vis = args.get("vision",(0,0,0,0,0,0,0))
         r,phi,omega = args.get("speed",(0,0,0))
+        energy = args.get("energy",0)
+        max_energy = args.get("maxenergy",1)
         n = 0
         for x in range(7):
             if vis[n][0] < vis[x][0]:
@@ -692,8 +707,9 @@ class Mind_const(Mind):
         if vis[n][0] > self.att_rate:
             if vis[n][1]:
                 attack = 1
-        write_inf(str(self.mvnot)+str(self.angvel))
-        return {"move":move, "attack":attack}
+        # write_inf(str(self.mvnot)+str(self.angvel))
+        color = [0,energy / max_energy,0]
+        return {"move":move, "attack":attack, "color":color}
 
 class Sensor:
     """ Суперкласс сенсора. На вход -- слои, которые он обрабатывает и выдаёт информацию """
@@ -708,7 +724,6 @@ class Eyes(Sensor):
     def __init__(self,*args1,**args2):
         Sensor.__init__(self,*args1,**args2)
         self.eyes = [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
-        # self.focus = 50 #оптимальное зрение
 
     def __call__(self,layers):
         # self.conversion = self._get_conversion() 
@@ -724,19 +739,18 @@ class Eyes(Sensor):
         radius = sobj.radius
         sphi = sobj.pos[1] # направление "взгляда"
         allowed = []
-        for y in range(3): #составляем список разрешённых
+        for y in range(3): # составляем список разрешённых положений
             for x in range(3):
                 if (x == 1 == y) or (abs(abs_angl(field_angle[y][x]-sphi)) <= 0.55 * pi): # ~ 105/2 + 45
                     allowed.append([x,y])
 
         # out = [0,0,0,0,0,0,0] # 0 -- за пределами видимости r = 100
-        r = [[100,0],[100,0],[100,0],[100,0],[100,0],[100,0],[100,0]] # расстояния + состояние существа
+        r = [[100,[0,0,0]],[100,[0,0,0]],[100,[0,0,0]],[100,[0,0,0]],[100,[0,0,0]],[100,[0,0,0]],[100,[0,0,0]]] # расстояния + цвет существа
         for (dx,dy) in allowed:
             for obj in objects:
                 if obj != sobj:
                     v = Vector( obj.pos[0].x+w*dx - X, obj.pos[0].y+h*dy - Y) # вектор между центрами
                     distance = v.r
-                    # print(distance)
                     if distance > 0.001:
                         dphi = atan(obj.radius/distance) # Радиус 
                     else:
@@ -745,12 +759,32 @@ class Eyes(Sensor):
                     n_l = abs_angl(v.phi - sphi - dphi) / (0.083 * pi)
 
                     for n in range( int(max(-3,n_l) + 3.5), int(min(3,n_r) + 3.5 + 1) ):
-                        if distance-obj.radius-radius < r[n][0]:
-                            r[n][0] = distance-obj.radius-radius
-                        r[n][1] = obj._get_lifestate()
+                        distance -= obj.radius + radius
+                        if distance < r[n][0]:
+                            if distance > 0:
+                                r[n][0] = distance
+                            else:
+                                r[n][0] = 0
+                        r[n][1] = obj.color
 
         self.eyes = [(1-a/100,b) for a,b in r]
         return self.eyes
+
+class Sensitivity(Sensor):
+    def __init__(self,*args1,**args2):
+        Sensor.__init__(self,*args1,**args2)
+        self.sensitivity = [0,0,0,0,0]
+        self._sens = [0,0,0,0,0]
+
+    def add(self,phi):
+        sens_phi = abs_angl(phi - self.obj.pos[1])
+        if (- 0.9 > sens_phi) or (0.9 < sens_phi): #105/2 gr
+            self.sensitivity[int ((sens_phi % (2*pi)) / 0.9 - 1) ] = 1 # (phi - 52.5) / 51 
+    def __call__(self):
+        a = [x for x in self.sensitivity]
+        self._sens = a
+        self.sensitivity = [0,0,0,0,0]
+        return a
 
 class Object: 
     """ Суперкласс объекта. Служит основой для других классов объектов. Статус: 0 -- мёртв (<0% энергии), 1 -- в спячке (<10% энергии), 2 -- жив"""
@@ -780,13 +814,15 @@ class Object:
         self._attack_range = attack_range #дальность атаки
         self._id = id
         self.age = 0
+        self._sensitivity = [0,0,0,0,0] # пять направлений чувствительности
+        self.color = [0,255,0]
 
     def _move(self): 
         """ Передвигает объект на вектор """
         self.pos[1] += self.speed[1] * dt # угловая скорость
         self.pos[1] %= 2*pi
 
-        self.pos[0] += self.speed[0] * dt#поступательная скорость
+        self.pos[0] += self.speed[0] * dt # поступательная скорость
         self.pos[0].x %= width
         self.pos[0].y %= height
 
@@ -870,6 +906,7 @@ class ObjectBot(Object):
     def __init__(self,**args):
         Object.__init__(self,**args)
         self.eyes = Eyes(self)
+        self.sensitivity = Sensitivity(self)
 
     def add_accel(self,usk):
         """ Добавляет ускорение по повороту """
@@ -880,20 +917,20 @@ class ObjectBot(Object):
         """ Вызывается, когда Родительский слой воздействует сам на себя """
         global layers
         
-        # pdb.set_trace()
-
         if self.status > 0: # Осторожно! РАБОТА МОЗГА
-            state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":self.eyes(layers),"ferromons":(0,0,0,0),"speed":(self.speed[0].r/10,self.speed[0].phi/2/pi,self.speed[1]/2/pi)}
+            state = {"energy":self._energy, "maxenergy": self._max_energy, "radius": self.radius, "vision":self.eyes(layers),"speed":(self.speed[0].r/10,self.speed[0].phi/2/pi,self.speed[1]/2/pi), "sensitivity": self.sensitivity()}
             ret =  self._mind.step(state)
             #Обработка результатов мозга
             accel = [x for x in ret.get("move",(0,0))]
+            accel = [x  * self.get_strong() for x in accel] # тратится энергия в зависимости от того, как сильно он применил силу IRL
             self.energy(- (abs(accel[0]) + abs(accel[1])) / 60) #вычитает энергию за передвижение. При k=1 и k_screen = 1, m=5, m_e = 1, e = 1 пройдёт 100 клеток
-            accel = [x  * self.get_strong() for x in accel]
             self.add_accel(accel) # применяет ускорение
 
             self._attack = ret.get("attack",0) # забирает силу атаки
-            self.energy(- self._attack / 60) # FACTOR забирает энергию на работу атаки FACTOR: При силе удара 1 и длинне 1(R) при жизни 1 он способен бить 490*k тиков не переставая 
+            self.energy(- self._attack * self.get_strong() / 60) # FACTOR забирает энергию на работу атаки FACTOR: При силе удара 1 и длинне 1(R) при жизни 1 он способен бить 490*k тиков не переставая 
             # применение
+            # Изменяем цвет
+            self.color = ret.get("color")
         else:
             self._attack = 0
 
@@ -931,30 +968,41 @@ class ObjectBot(Object):
 # ========================== PROGRAMM ============================
 
 def add_info(obj,type):
-    # global layers_lock
-    # layers_lock.acquire(1)
     k_obj = layer_obj.get_k_objs()
-    if type == "born":
-        _info = {}
-        _info['born'] = tick * dt
-        _info['radius'] = obj.radius
-        _info['mvnot0'] = obj._mind.mvnot[0]
-        _info['mvnot1'] = obj._mind.mvnot[1]
-        _info['angvel'] = obj._mind.angvel
-        _info['correct']= obj._mind.correct
-        _info['strong'] = obj.get_strong()
-        _info['att_rate'] = obj._mind.att_rate
-        _info['k_obj'] = k_obj
-        _info['die'] = 0
-        info.update({obj._id: _info })
-        print(type+". K:%d" %k_obj)
-    if type == "die":
-        info[obj._id]['die'] = tick * dt
-        print(type+". K:%d" %k_obj)
-
-    # layers_lock.release()
+    # if type == "born":
+    #     _info = {}
+    #     _info['born'] = tick * dt
+    #     _info['radius'] = obj.radius
+    #     _info['mvnot0'] = obj._mind.mvnot[0]
+    #     _info['mvnot1'] = obj._mind.mvnot[1]
+    #     _info['angvel'] = obj._mind.angvel
+    #     _info['correct']= obj._mind.correct
+    #     _info['strong'] = obj.get_strong()
+    #     _info['att_rate'] = obj._mind.att_rate
+    #     _info['k_obj'] = k_obj
+    #     _info['die'] = 0
+    #     info.update({obj._id: _info })
+    #     # print(type+". K:%d" %k_obj)
+    # if type == "die":
+    #     info[obj._id]['die'] = tick * dt
+        # print(type+". K:%d" %k_obj)
     pass
     
+def write_info_into_file():
+    global tick,info
+    print("Ticks: %d" %tick)
+    f = open("logs/test%d.csv" %(tick),"wt")
+    print("Write info...")
+    f.write("ID;Родился;Умер;Кол-во;Радиус;Поиск_r;Поиск_phi;Ускорение поворота к жертве;Корректировка относительно скорости;МинRАтак;Мощь\n")
+    for _id in info:
+        inf = info[_id]
+        # f.write( "%.3f;%d;%.3f;%.3f;%.3f;%.3f;%3f;\n"  %(inf['tick'],inf['k_obj'],inf['m_radius'],inf['m_mvnot0'],inf['m_mvnot1'],inf['m_angvel'],inf['m_correct']) )
+        # f.write("%d;%d;%d\n" %(tk,info[tk][1],int(info[tk][0]*1000) ))
+        f.write("%d;%.3f;%.3f;%d;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f;%.3f\n" %(_id,inf['born'],inf['die'],inf['k_obj'],inf['radius'],inf['mvnot0'],inf['mvnot1'],inf['angvel'],inf['correct'],inf['att_rate'],inf['strong']) )
+        if _id % 50:
+            print("Complete:%d" %(_id))
+    f.close()
+    print('closed')
 
 def loop_step():
     global layers,tick,isEnd,update_info
@@ -982,7 +1030,7 @@ def loop_step():
 
             tick += 1
             # if tick > 1000:
-                # isEnd = True
+            #     isEnd = True
             # print('%d: step on %.1fms' %(tick,(tm2-tm1)*1000))
         else:
             if not lock:
@@ -1054,8 +1102,8 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (25,38,0),radius = 5,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
         layer.create_obj(ObjectBot( pos = (30,38,pi),radius = 5,speed = (-1,0,0), strong = 1, energy = 0.9))
     elif test == '16':
-        layer.create_obj(ObjectBot( pos = (5,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
-        layer.create_obj(ObjectBot( pos = (30,38,0),radius = 2,speed = (-1,0,0), strong = 1, energy = 0.9))
+        layer.create_obj(ObjectBot( pos = (25,38,0),radius = 4,speed = (1,0,0),energy = 0.9,strong = 1,maxenergy = 1))
+        layer.create_obj(ObjectBot( pos = (15,38,0),radius = 2,speed = (-1,0,0), strong = 1, energy = 0.9))
     elif test == '17':
         layer.create_obj(ObjectBot( pos = (0,38,0),radius = 2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1))
     elif test == '18':
@@ -1075,11 +1123,11 @@ def tests(test,layer):
         layer.create_obj(ObjectBot( pos = (0,20,random.random()*2*pi),radius = 5,speed = (0,0,0.1),energy = 0.9,strong = 1,maxenergy = 1))
         layer.create_obj(ObjectBot( pos = (30,20,random.random()*2*pi),radius = 5,speed = (0,0,0),energy = 0.9,strong = 1,maxenergy = 1))
     elif test == '24':
-        for x in range(50):
+        for x in range(20):
             layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 1 + random.random()*5,speed = (0,0,0),energy = 0.4,strong = 1,maxenergy = 1,mind = Mind_const(mvnot = (random.random(),random.random()),angvel = random.random())))
     elif test == '25':
         for x in range(5):
-            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 5 + random.random()*2,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1,mind = Mind_const()))
+            layer.create_obj(ObjectBot( pos = (random.randint(0,100),random.randint(0,100),random.random()*2*pi),radius = 1 + random.random()*5,speed = (0,0,0),energy = 1,strong = 1,maxenergy = 1,mind = Mind_const()))
     elif test == '26':
         """ Подкорректированные мозги """
         for x in range(5):
@@ -1103,6 +1151,7 @@ parser.add_argument("-s","--screen",help="Type output screen:\n curses - curses 
 parser.add_argument("-d","--deltat",help="Set interval of the tick. ")
 parser.add_argument("-t","--test",help="Number of test. ")
 args = parser.parse_args()
+
 print("Init...")
 if args.deltat == None:
     dt = 0.1
@@ -1151,8 +1200,9 @@ if __name__ == '__main__':
         # step_thread.start()
         # out_thread = threading.Thread(target = ScreenStandart(layers,layers_lock))
         # loop_step()
-        screen = ScreenStandart(layers,layers_lock)
-        screen._end()
+        # screen = ScreenStandart(layers,layers_lock)
+        # screen._end()
+        loop_step()
         # screen.run()
 
     print("Bye!")

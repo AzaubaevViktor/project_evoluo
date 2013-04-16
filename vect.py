@@ -32,16 +32,17 @@ class Vector:
 
     def _polar_to_cartesian(self):
         """ Переводит координаты из полярных в декартовы """
-        if not self.a[4]:
-            self.a[4] = 1
-            r = self.a[2]
-            phi = self.a[3]
-            self.a[0] = r*cos(phi)
-            self.a[1] = r*sin(phi)
+        # if not self.a[4]:
+        self.a[4] = 1
+        r = self.a[2]
+        phi = self.a[3]
+        self.a[0] = r*cos(phi)
+        self.a[1] = r*sin(phi)
 
     def __getattr__(self,name):
         if name == 'cart':
-            self._polar_to_cartesian()                
+            if not self.a[4]:
+                self._polar_to_cartesian()                
             return self.a[0:2]
 
         elif name == 'pol':
@@ -50,7 +51,8 @@ class Vector:
             return self.a[2:4]
 
         elif (name == 'x') or (name == 'y'):
-            self._polar_to_cartesian()
+            if not self.a[4]:
+                self._polar_to_cartesian()
             if name == 'x':
                 return self.a[0]
             else:
@@ -97,26 +99,34 @@ class Vector:
             self.__dict__[name] = value
 
     def __add__(self,v):
-        self._polar_to_cartesian()
-        v._polar_to_cartesian()
+        if not self.a[4]:
+            self._polar_to_cartesian()
+        if not v.a[4]:
+            v._polar_to_cartesian()
         return Vector(self.a[0] + v.a[0], self.a[1] + v.a[1], isPolar = False)        
 
     def __iadd__(self,v):
-        self._polar_to_cartesian()
-        v._polar_to_cartesian()
+        if not self.a[4]:
+            self._polar_to_cartesian()
+        if not v.a[4]:
+            v._polar_to_cartesian()
         self.a[0] += v.a[0]
         self.a[1] += v.a[1]
         self.a[5] = 0
         return self
 
     def __sub__(self,v):
-        self._polar_to_cartesian()
-        v._polar_to_cartesian()
+        if not self.a[4]:
+            self._polar_to_cartesian()
+        if not v.a[4]:
+            v._polar_to_cartesian()
         return Vector(self.a[0] - v.a[0], self.a[1] - v.a[1], isPolar = False)   
 
     def __isub__(self,v):
-        self._polar_to_cartesian()
-        v._polar_to_cartesian()
+        if not self.a[4]:
+            self._polar_to_cartesian()
+        if not v.a[4]:
+            v._polar_to_cartesian()
         self.a[0] -= v.a[0]
         self.a[1] -= v.a[1]
         self.a[5] = 0
@@ -163,7 +173,8 @@ class Vector:
     def __str__(self):
         if not self.a[5]:
             self._cartesian_to_polar()
-        self._polar_to_cartesian()
+        if not self.a[4]:
+            self._polar_to_cartesian()
         return ({"x":self.a[0],"y":self.a[1],"r":self.a[2],"phi":self.a[3]}.__str__())
 
     def one(self):
